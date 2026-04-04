@@ -24,9 +24,19 @@ RULES — follow strictly:
 
 _XML_TOOL_ADDON = """
 
-## Tool Protocol (use these XML tags since function-calling is unavailable)
+## Tool Protocol (use these XML tags to perform actions)
 
-To write or create a file:
+List files in current directory:
+<bash>
+<command>ls -la</command>
+</bash>
+
+Read a file:
+<read_file>
+<path>filename.txt</path>
+</read_file>
+
+Write/create a file:
 <write_file>
 <path>filename.txt</path>
 <content>
@@ -34,17 +44,12 @@ file content here
 </content>
 </write_file>
 
-To read a file:
-<read_file>
-<path>filename.txt</path>
-</read_file>
-
-To run a shell command:
+Run any shell command:
 <bash>
-<command>ls -la</command>
+<command>any shell command here</command>
 </bash>
 
-IMPORTANT: Use these XML tags to actually perform file operations. Do NOT just describe the action or print code blocks.\
+IMPORTANT: Use these XML tags to actually perform actions. Never just describe what you would do.\
 """
 
 
@@ -109,14 +114,16 @@ async def run(
 
 
 def _build_system_prompt(path: str, no_map: bool) -> str:
+    cwd = str(Path(path).resolve())
+    base = _SYSTEM_BASE + f"\n\nWorking directory: {cwd}"
     if no_map:
-        return _SYSTEM_BASE
+        return base
     repo_map = generate_repo_map(path)
-    return f"{_SYSTEM_BASE}\n\n## Repo Map\n{repo_map}"
+    return f"{base}\n\n## Files in working directory\n{repo_map}"
 
 
 async def _loop(client: httpx.AsyncClient, messages: list, model: str, config: Config) -> str:
-    use_tools = True
+    use_tools = True  # starts True; flipped to False on first 400 and stays False
     while True:
         data, use_tools = await _chat(client, messages, model, config, use_tools)
         msg = data["choices"][0]["message"]
@@ -259,7 +266,7 @@ async def _chat(
         await asyncio.sleep(delay)
 
     if response.status_code == 400 and use_tools and "tool" in response.text.lower():
-        ui.console.print("[dim]Function calling unavailable — switching to XML tool protocol...[/dim]")
+        ui.console.print("[dim]Function calling unavailable — using XML tool protocol[/dim]")
         _inject_xml_system(messages)
         return await _chat(client, messages, model, config, use_tools=False)
 
