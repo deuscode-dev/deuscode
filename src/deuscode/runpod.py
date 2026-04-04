@@ -4,7 +4,7 @@ import httpx
 
 _API_URL = "https://api.runpod.io/graphql"
 _POLL_INTERVAL = 10
-_TIMEOUT_SECONDS = 600
+_IDLE_TIMEOUT = 300  # seconds without any status change before giving up
 
 
 def _headers(api_key: str) -> dict:
@@ -106,40 +106,63 @@ async def wait_for_ready(api_key: str, pod_id: str, on_poll=None) -> str:
     }
     """
     elapsed = 0
+    idle = 0
+    last_state: tuple | None = None
     async with httpx.AsyncClient(timeout=30.0) as client:
-        while elapsed < _TIMEOUT_SECONDS:
+        while True:
             r = await client.post(_API_URL, headers=_headers(api_key), json={"query": query, "variables": {"podId": pod_id}})
             r.raise_for_status()
             body = r.json()
             if body.get("errors"):
                 raise RuntimeError(body["errors"][0]["message"])
             pod = body["data"]["pod"]
+            state = (pod.get("desiredStatus"), bool(pod.get("runtime")))
+            if state != last_state:
+                last_state = state
+                idle = 0
+            else:
+                idle += _POLL_INTERVAL
             if on_poll:
                 on_poll(pod, elapsed)
-            if pod["desiredStatus"] == "RUNNING" and pod.get("runtime"):
+            if pod.get("desiredStatus") == "RUNNING" and pod.get("runtime"):
                 return _extract_endpoint(pod)
+            if idle >= _IDLE_TIMEOUT:
+                raise TimeoutError(
+                    f"Pod {pod_id} stalled — no status change for {_IDLE_TIMEOUT}s "
+                    f"(last: {last_state})"
+                )
             await asyncio.sleep(_POLL_INTERVAL)
             elapsed += _POLL_INTERVAL
-    raise TimeoutError(f"Pod {pod_id} did not become ready within {_TIMEOUT_SECONDS}s")
 
 
-async def wait_for_health(endpoint: str, on_poll=None, timeout: int = 600) -> None:
-    """Poll GET /health until vLLM responds 200."""
+async def wait_for_health(endpoint: str, on_poll=None) -> None:
+    """Poll GET /health until vLLM responds 200, timing out only if status stops changing."""
     url = f"{endpoint.rstrip('/')}/health"
     elapsed = 0
+    idle = 0
+    last_status: int | None = None
     async with httpx.AsyncClient(timeout=10.0) as client:
-        while elapsed < timeout:
+        while True:
             try:
                 r = await client.get(url)
-                if r.status_code == 200:
-                    return
+                status = r.status_code
             except Exception:
-                pass
+                status = -1
+            if status == 200:
+                return
+            if status != last_status:
+                last_status = status
+                idle = 0
+            else:
+                idle += _POLL_INTERVAL
             if on_poll:
                 on_poll(elapsed)
+            if idle >= _IDLE_TIMEOUT:
+                raise TimeoutError(
+                    f"vLLM stalled at {url} — status {last_status} unchanged for {_IDLE_TIMEOUT}s"
+                )
             await asyncio.sleep(_POLL_INTERVAL)
             elapsed += _POLL_INTERVAL
-    raise TimeoutError(f"vLLM did not respond at {url} within {timeout}s")
 
 
 def _extract_endpoint(pod: dict) -> str:

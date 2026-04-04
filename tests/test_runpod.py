@@ -43,7 +43,7 @@ async def test_wait_for_ready_timeout():
         })
 
     with patch("deuscode.runpod.httpx.AsyncClient") as MockClient, \
-         patch("deuscode.runpod._TIMEOUT_SECONDS", 1), \
+         patch("deuscode.runpod._IDLE_TIMEOUT", 1), \
          patch("deuscode.runpod._POLL_INTERVAL", 1), \
          patch("asyncio.sleep", new_callable=AsyncMock):
         instance = AsyncMock()
