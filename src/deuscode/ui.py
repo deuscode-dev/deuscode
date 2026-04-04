@@ -60,6 +60,10 @@ def final_answer(text: str) -> None:
     console.print(Panel(text, title="[bold cyan]Deus[/bold cyan]", border_style="cyan"))
 
 
+def print_success(text: str) -> None:
+    console.print(f"[bold green]✓ {text}[/bold green]")
+
+
 def error(text: str) -> None:
     console.print(Panel(text, title="[bold red]Error[/bold red]", border_style="red"))
 

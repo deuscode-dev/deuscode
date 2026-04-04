@@ -6,7 +6,6 @@ import yaml
 from deuscode import ui
 from deuscode.config import CONFIG_PATH
 
-_RUNPOD_API = "https://api.runpod.io/graphql"
 _DONE_MARKER = "DEUS_DONE"
 _FAIL_MARKER = "DEUS_FAIL"
 
@@ -23,22 +22,15 @@ async def list_downloaded_models(base_url: str) -> list[str]:
 
 
 async def _pod_exec(api_key: str, pod_id: str, command: list[str]) -> str:
-    mutation = """
-    mutation($input: PodExecInput!) {
-      podExec(input: $input) { output }
-    }
-    """
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    url = f"https://api.runpod.io/v2/{pod_id}/runsync"
     async with httpx.AsyncClient(timeout=60.0) as client:
-        r = await client.post(_RUNPOD_API, headers=headers, json={
-            "query": mutation,
-            "variables": {"input": {"podId": pod_id, "command": command}},
-        })
+        r = await client.post(
+            url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"input": {"command": command}},
+        )
         r.raise_for_status()
-        body = r.json()
-        if body.get("errors"):
-            raise RuntimeError(body["errors"][0]["message"])
-        return (body["data"]["podExec"] or {}).get("output") or ""
+        return r.json().get("output", {}).get("stdout", "")
 
 
 async def get_pod_storage_info(api_key: str, pod_id: str) -> dict:

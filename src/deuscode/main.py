@@ -8,7 +8,7 @@ from rich.prompt import Confirm
 from rich.table import Table
 
 from deuscode import ui
-from deuscode.agent import chat_loop
+from deuscode.chat import run_run_chat_loop
 from deuscode.setup import run_setup_runpod, run_stop_runpod, run_connect_runpod
 from deuscode.config import CONFIG_PATH
 from deuscode.models import MODELS, get_models_by_size, CUSTOM_MODEL_OPTION
@@ -139,12 +139,12 @@ def ask(prompt: str = typer.Argument(...),
         path: str = typer.Option(".", "--path"),
         model: Optional[str] = typer.Option(None, "--model"),
         no_map: bool = typer.Option(False, "--no-map")) -> None:
-    _run(chat_loop(initial_prompt=prompt, path=path, model_override=model, no_map=no_map))
+    _run(run_chat_loop(initial_prompt=prompt, path=path, model_override=model, no_map=no_map))
 
 
 def main() -> None:
     if len(sys.argv) == 1:
-        _run(chat_loop())
+        _run(run_chat_loop())
         return
     known_subcommands = {"setup", "connect", "model", "ask", "--help", "-h", "--version"}
     if sys.argv[1] not in known_subcommands:

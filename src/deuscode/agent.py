@@ -55,52 +55,6 @@ IMPORTANT: Use these XML tags to actually perform actions. Never just describe w
 """
 
 
-async def chat_loop(
-    initial_prompt: str | None = None,
-    path: str = ".",
-    model_override: str | None = None,
-    no_map: bool = False,
-) -> None:
-    from deuscode.config import load_config
-    from rich.prompt import Prompt
-    try:
-        config = load_config()
-    except FileNotFoundError as e:
-        ui.error(str(e))
-        return
-    model = model_override or config.model
-    system_prompt = _build_system_prompt(path, no_map)
-    messages: list = [{"role": "system", "content": system_prompt}]
-
-    dir_name = Path(path).resolve().name
-    if not no_map:
-        file_count = system_prompt.count("\n")
-        ui.print_dim(f"📁 Mapped {file_count} files in {dir_name}")
-    ui.console.print(f"[bold green]Deus[/bold green] [dim]{model}[/dim]  (Ctrl+C or empty line to exit)\n")
-
-    prompt_label = f"[bold cyan][{dir_name}] you[/bold cyan]"
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        pending = initial_prompt
-        while True:
-            if pending is not None:
-                user_input = pending
-                pending = None
-                ui.console.print(f"{prompt_label}: {user_input}")
-            else:
-                try:
-                    user_input = Prompt.ask(prompt_label)
-                except (EOFError, KeyboardInterrupt):
-                    ui.console.print("\n[dim]Goodbye.[/dim]")
-                    break
-                if not user_input.strip():
-                    ui.console.print("[dim]Goodbye.[/dim]")
-                    break
-            messages.append({"role": "user", "content": user_input})
-            ui.thinking(model)
-            result = await _loop(client, messages, model, config)
-            ui.final_answer(result)
-    await _maybe_auto_stop(config)
-
 
 async def run(
     prompt: str,
