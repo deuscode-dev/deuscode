@@ -97,7 +97,9 @@ async def _loop(client: httpx.AsyncClient, messages: list, model: str, config: C
 
         tool_calls = msg.get("tool_calls") or []
         if not tool_calls:
-            return msg.get("content") or ""
+            content = msg.get("content") or ""
+            await _offer_code_blocks(content)
+            return content
 
         for tc in tool_calls:
             result = await _execute_tool(tc)
@@ -106,6 +108,33 @@ async def _loop(client: httpx.AsyncClient, messages: list, model: str, config: C
                 "tool_call_id": tc["id"],
                 "content": result,
             })
+
+
+import re as _re
+
+_CODE_BLOCK_RE = _re.compile(r"```(?:\w+)?\n(.*?)```", _re.DOTALL)
+
+
+async def _offer_code_blocks(text: str) -> None:
+    """If the model printed code instead of calling write_file, offer to save it."""
+    from rich.prompt import Prompt
+    from pathlib import Path
+    blocks = _CODE_BLOCK_RE.findall(text)
+    if not blocks:
+        return
+    for i, code in enumerate(blocks, 1):
+        label = f"code block {i}" if len(blocks) > 1 else "this code block"
+        ui.console.print(f"[dim]Save {label} to a file? Enter path or leave empty to skip.[/dim]")
+        try:
+            path = Prompt.ask("[bold cyan]save to[/bold cyan]", default="")
+        except (EOFError, KeyboardInterrupt):
+            return
+        if not path.strip():
+            continue
+        target = Path(path).expanduser()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(code, encoding="utf-8")
+        ui.console.print(f"[green]✓ Saved {target}[/green]")
 
 
 _RETRY_STATUSES = {502, 503, 504}
