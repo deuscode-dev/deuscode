@@ -97,7 +97,9 @@ async def _loop(client: httpx.AsyncClient, messages: list, model: str, config: C
 
         tool_calls = msg.get("tool_calls") or []
         if not tool_calls:
-            content = msg.get("content") or ""
+            content = _strip_thinking(msg.get("content") or "")
+            if not content.strip():
+                content = "[dim](no response — model may be too small or thinking output was empty)[/dim]"
             await _offer_code_blocks(content)
             return content
 
@@ -111,6 +113,14 @@ async def _loop(client: httpx.AsyncClient, messages: list, model: str, config: C
 
 
 import re as _re
+
+_THINK_RE = _re.compile(r"<think>.*?</think>", _re.DOTALL)
+
+
+def _strip_thinking(text: str) -> str:
+    """Remove <think>...</think> blocks emitted by Qwen3 and similar models."""
+    return _THINK_RE.sub("", text).strip()
+
 
 _CODE_BLOCK_RE = _re.compile(r"```(\w*)\n(.*?)```", _re.DOTALL)
 _FILENAME_RE = _re.compile(r"\b([\w.-]+\.(?:html?|css|js|ts|py|sh|json|yaml|yml|xml|txt|md|rs|go|java|c|cpp|h))\b")
