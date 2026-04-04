@@ -11,24 +11,25 @@ def _headers(api_key: str) -> dict:
     return {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
 
-async def get_gpu_types(api_key: str) -> list[dict]:
+async def get_gpu_types(api_key: str, cloud_type: str = "COMMUNITY") -> list[dict]:
     query = """
-    query {
-      gpuTypes {
+    query($cloudType: String) {
+      gpuTypes(input: { cloudType: $cloudType }) {
         id
         displayName
         memoryInGb
         securePrice
+        communityPrice
       }
     }
     """
     async with httpx.AsyncClient(timeout=30.0) as client:
-        r = await client.post(_API_URL, headers=_headers(api_key), json={"query": query})
+        r = await client.post(_API_URL, headers=_headers(api_key), json={"query": query, "variables": {"cloudType": cloud_type}})
         r.raise_for_status()
         return r.json()["data"]["gpuTypes"]
 
 
-async def start_pod(api_key: str, gpu_type_id: str, model_id: str) -> dict:
+async def start_pod(api_key: str, gpu_type_id: str, model_id: str, cloud_type: str = "COMMUNITY") -> dict:
     mutation = """
     mutation($input: PodFindAndDeployOnDemandInput!) {
       podFindAndDeployOnDemand(input: $input) {
@@ -40,6 +41,7 @@ async def start_pod(api_key: str, gpu_type_id: str, model_id: str) -> dict:
     variables = {
         "input": {
             "gpuTypeId": gpu_type_id,
+            "cloudType": cloud_type,
             "imageName": "vllm/vllm-openai:latest",
             "containerDiskInGb": 50,
             "volumeInGb": 50,
