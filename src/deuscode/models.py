@@ -148,3 +148,19 @@ def filter_by_size(models: list[ModelEntry], size: str) -> list[ModelEntry]:
     if size == "large":
         return [m for m in models if m["vram_gb"] > 40]
     return models
+
+
+_SIZE_RANGES: dict[str, tuple[int, int]] = {
+    "small":  (0, 16),
+    "medium": (17, 40),
+    "big":    (41, 999),
+}
+
+
+def get_models_by_size(size: str) -> list[ModelEntry]:
+    """Filter by size name (small/medium/big/all). Case-insensitive."""
+    key = size.lower()
+    if key == "all":
+        return MODELS
+    lo, hi = _SIZE_RANGES.get(key, (0, 999))
+    return [m for m in MODELS if lo <= m["vram_gb"] <= hi]
