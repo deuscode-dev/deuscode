@@ -4,8 +4,6 @@ from pathlib import Path
 
 from deuscode import ui
 
-_CWD = Path.cwd().resolve()
-
 TOOL_SCHEMAS = [
     {
         "type": "function",
@@ -49,26 +47,15 @@ TOOL_SCHEMAS = [
 ]
 
 
-def _safe_path(path: str) -> Path | None:
-    resolved = Path(path).resolve()
-    if not str(resolved).startswith(str(_CWD)):
-        return None
-    return resolved
-
-
 async def read_file(path: str) -> str:
-    target = _safe_path(path)
-    if target is None:
-        return f"Error: path '{path}' is outside the working directory."
+    target = Path(path).expanduser().resolve()
     if not target.exists():
         return f"Error: '{path}' does not exist."
     return target.read_text(encoding="utf-8", errors="replace")
 
 
 async def write_file(path: str, content: str) -> str:
-    target = _safe_path(path)
-    if target is None:
-        return f"Error: path '{path}' is outside the working directory."
+    target = Path(path).expanduser().resolve()
     if target.exists():
         existing = target.read_text(encoding="utf-8", errors="replace")
         _show_diff(existing, content, path)
