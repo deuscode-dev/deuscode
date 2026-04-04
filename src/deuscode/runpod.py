@@ -99,8 +99,9 @@ async def wait_for_ready(api_key: str, pod_id: str) -> str:
     query = """
     query($podId: String!) {
       pod(input: { podId: $podId }) {
+        id
         desiredStatus
-        runtime { ports { ip port isIpPublic } }
+        runtime { ports { ip isIpPublic privatePort publicPort type } }
       }
     }
     """
@@ -109,8 +110,11 @@ async def wait_for_ready(api_key: str, pod_id: str) -> str:
         while elapsed < _TIMEOUT_SECONDS:
             r = await client.post(_API_URL, headers=_headers(api_key), json={"query": query, "variables": {"podId": pod_id}})
             r.raise_for_status()
-            pod = r.json()["data"]["pod"]
-            if pod["desiredStatus"] == "RUNNING":
+            body = r.json()
+            if body.get("errors"):
+                raise RuntimeError(body["errors"][0]["message"])
+            pod = body["data"]["pod"]
+            if pod["desiredStatus"] == "RUNNING" and pod.get("runtime"):
                 return _extract_endpoint(pod)
             await asyncio.sleep(_POLL_INTERVAL)
             elapsed += _POLL_INTERVAL
@@ -118,7 +122,11 @@ async def wait_for_ready(api_key: str, pod_id: str) -> str:
 
 
 def _extract_endpoint(pod: dict) -> str:
-    for port_info in (pod.get("runtime") or {}).get("ports") or []:
-        if port_info.get("isIpPublic") and port_info.get("port") == 8000:
-            return f"https://{port_info['ip']}:{port_info['port']}"
+    pod_id = pod.get("id", "")
+    for p in (pod.get("runtime") or {}).get("ports") or []:
+        if p.get("privatePort") != 8000:
+            continue
+        if p.get("isIpPublic"):
+            return f"https://{p['ip']}:{p['publicPort']}"
+        return f"https://{pod_id}-8000.proxy.runpod.net"
     return ""
