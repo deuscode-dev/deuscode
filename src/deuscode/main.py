@@ -1,5 +1,6 @@
 import sys
 import asyncio
+import concurrent.futures
 from typing import Optional
 
 import typer
@@ -19,6 +20,19 @@ setup_app = typer.Typer(help="Configure Deus endpoints and models.")
 app.add_typer(setup_app, name="setup")
 
 
+def _run(coro):
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, coro)
+                return future.result()
+        else:
+            return loop.run_until_complete(coro)
+    except RuntimeError:
+        return asyncio.run(coro)
+
+
 @setup_app.callback(invoke_without_command=True)
 def setup_callback(
     ctx: typer.Context,
@@ -28,9 +42,9 @@ def setup_callback(
     if ctx.invoked_subcommand is not None:
         return
     if stop:
-        asyncio.run(run_stop_runpod())
+        _run(run_stop_runpod())
     elif runpod:
-        asyncio.run(run_setup_runpod())
+        _run(run_setup_runpod())
     else:
         ui.error("Use --runpod to configure or --stop to stop pod")
 
@@ -42,7 +56,7 @@ def ask(
     model: Optional[str] = typer.Option(None, "--model", help="Override config model"),
     no_map: bool = typer.Option(False, "--no-map", help="Skip repo-map"),
 ) -> None:
-    asyncio.run(run_agent(prompt, path, model, no_map))
+    _run(run_agent(prompt, path, model, no_map))
 
 
 def main() -> None:

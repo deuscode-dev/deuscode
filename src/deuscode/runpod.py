@@ -53,7 +53,13 @@ async def start_pod(api_key: str, gpu_type_id: str, model_id: str) -> dict:
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.post(_API_URL, headers=_headers(api_key), json={"query": mutation, "variables": variables})
         r.raise_for_status()
-        return r.json()["data"]["podFindAndDeployOnDemand"]
+        body = r.json()
+        print(f"[debug] start_pod response: {body}")
+        if "errors" in body:
+            raise RuntimeError(f"RunPod API error: {body['errors']}")
+        if not body.get("data"):
+            raise RuntimeError(f"RunPod returned unexpected response: {body}")
+        return body["data"]["podFindAndDeployOnDemand"]
 
 
 async def stop_pod(api_key: str, pod_id: str) -> bool:

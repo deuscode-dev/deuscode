@@ -88,6 +88,8 @@ def _pick_gpu(gpus: list[dict]) -> dict:
 async def _start_with_spinner(api_key: str, gpu_id: str, model_id: str) -> str:
     ui.console.print("[dim]Starting pod...[/dim]")
     pod = await runpod.start_pod(api_key, gpu_id, model_id)
+    if not pod or "id" not in pod:
+        raise RuntimeError(f"Pod start failed: {pod}")
     return pod["id"]
 
 
