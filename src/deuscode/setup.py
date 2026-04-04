@@ -142,33 +142,37 @@ async def _start_with_spinner(api_key: str, gpu_id: str, model_id: str, cloud_ty
 
 
 async def _wait_with_spinner(api_key: str, pod_id: str) -> str:
-    state = {"renderable": _status_panel(pod_id, "STARTING", 0)}
+    state = {"renderable": _status_panel(pod_id, {}, 0)}
     with Live(state["renderable"], console=ui.console, refresh_per_second=1) as live:
         def on_poll(pod, elapsed):
-            state["renderable"] = _status_panel(pod_id, pod.get("desiredStatus", "?"), elapsed)
+            state["renderable"] = _status_panel(pod_id, pod, elapsed)
             live.update(state["renderable"])
         return await runpod.wait_for_ready(api_key, pod_id, on_poll=on_poll)
 
 
-def _status_panel(pod_id: str, status: str, elapsed: int) -> Panel:
+def _status_panel(pod_id: str, pod: dict, elapsed: int) -> Panel:
     mins, secs = divmod(elapsed, 60)
-    phase = _start_phase(elapsed)
+    has_runtime = bool((pod or {}).get("runtime"))
+    phase = _start_phase(elapsed, has_runtime)
+    display_status = "vLLM ready" if has_runtime else "initializing"
     text = Text()
     text.append(f"Pod:     ", style="dim")
     text.append(f"{pod_id}\n", style="cyan")
     text.append(f"Status:  ", style="dim")
-    text.append(f"{status}\n", style="yellow" if status != "RUNNING" else "green")
+    text.append(f"{display_status}\n", style="green" if has_runtime else "yellow")
     text.append(f"Elapsed: ", style="dim")
     text.append(f"{mins:02d}:{secs:02d}\n", style="white")
     text.append(f"\n{phase}", style="dim")
     return Panel(text, title="[bold]Starting vLLM on RunPod[/bold]", border_style="yellow")
 
 
-def _start_phase(elapsed: int) -> str:
+def _start_phase(elapsed: int, has_runtime: bool) -> str:
+    if has_runtime:
+        return "✓ vLLM is up and responding."
     if elapsed < 30:
-        return "⏳ Allocating pod and pulling Docker image..."
+        return "⏳ Pulling Docker image..."
     if elapsed < 90:
-        return "⏳ Starting vLLM server..."
+        return "⏳ Starting vLLM process..."
     return "⏳ Loading model weights into GPU memory (large models take 3-5 min)..."
 
 
