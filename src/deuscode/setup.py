@@ -2,6 +2,9 @@ import yaml
 import typer
 from rich.prompt import Prompt, Confirm, IntPrompt
 from rich.table import Table
+from rich.live import Live
+from rich.panel import Panel
+from rich.text import Text
 
 from deuscode import ui
 from deuscode.config import CONFIG_PATH
@@ -139,8 +142,34 @@ async def _start_with_spinner(api_key: str, gpu_id: str, model_id: str, cloud_ty
 
 
 async def _wait_with_spinner(api_key: str, pod_id: str) -> str:
-    ui.console.print("[dim]Waiting for vLLM to be ready (this takes 2-3 min)...[/dim]")
-    return await runpod.wait_for_ready(api_key, pod_id)
+    state = {"renderable": _status_panel(pod_id, "STARTING", 0)}
+    with Live(state["renderable"], console=ui.console, refresh_per_second=1) as live:
+        def on_poll(pod, elapsed):
+            state["renderable"] = _status_panel(pod_id, pod.get("desiredStatus", "?"), elapsed)
+            live.update(state["renderable"])
+        return await runpod.wait_for_ready(api_key, pod_id, on_poll=on_poll)
+
+
+def _status_panel(pod_id: str, status: str, elapsed: int) -> Panel:
+    mins, secs = divmod(elapsed, 60)
+    phase = _start_phase(elapsed)
+    text = Text()
+    text.append(f"Pod:     ", style="dim")
+    text.append(f"{pod_id}\n", style="cyan")
+    text.append(f"Status:  ", style="dim")
+    text.append(f"{status}\n", style="yellow" if status != "RUNNING" else "green")
+    text.append(f"Elapsed: ", style="dim")
+    text.append(f"{mins:02d}:{secs:02d}\n", style="white")
+    text.append(f"\n{phase}", style="dim")
+    return Panel(text, title="[bold]Starting vLLM on RunPod[/bold]", border_style="yellow")
+
+
+def _start_phase(elapsed: int) -> str:
+    if elapsed < 30:
+        return "⏳ Allocating pod and pulling Docker image..."
+    if elapsed < 90:
+        return "⏳ Starting vLLM server..."
+    return "⏳ Loading model weights into GPU memory (large models take 3-5 min)..."
 
 
 def _save_config(endpoint: str, api_key: str, model_id: str, pod_id: str, auto_stop: bool, cloud_type: str) -> None:

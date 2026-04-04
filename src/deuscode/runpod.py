@@ -95,7 +95,7 @@ async def stop_pod(api_key: str, pod_id: str) -> bool:
         return True
 
 
-async def wait_for_ready(api_key: str, pod_id: str) -> str:
+async def wait_for_ready(api_key: str, pod_id: str, on_poll=None) -> str:
     query = """
     query($podId: String!) {
       pod(input: { podId: $podId }) {
@@ -114,6 +114,8 @@ async def wait_for_ready(api_key: str, pod_id: str) -> str:
             if body.get("errors"):
                 raise RuntimeError(body["errors"][0]["message"])
             pod = body["data"]["pod"]
+            if on_poll:
+                on_poll(pod, elapsed)
             if pod["desiredStatus"] == "RUNNING" and pod.get("runtime"):
                 return _extract_endpoint(pod)
             await asyncio.sleep(_POLL_INTERVAL)
