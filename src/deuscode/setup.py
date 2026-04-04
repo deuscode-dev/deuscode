@@ -152,33 +152,52 @@ async def _start_with_spinner(api_key: str, gpu_id: str, model_id: str, cloud_ty
 
 
 async def _wait_with_spinner(api_key: str, pod_id: str) -> str:
-    state = {"renderable": _status_panel(pod_id, {}, 0)}
+    state = {"renderable": _status_panel(pod_id, "init", 0), "elapsed": 0}
     with Live(state["renderable"], console=ui.console, refresh_per_second=1) as live:
-        def on_poll(pod, elapsed):
-            state["renderable"] = _status_panel(pod_id, pod, elapsed)
+        def on_pod_poll(pod, elapsed):
+            state["elapsed"] = elapsed
+            state["renderable"] = _status_panel(pod_id, "port", elapsed)
             live.update(state["renderable"])
-        return await runpod.wait_for_ready(api_key, pod_id, on_poll=on_poll)
+
+        endpoint = await runpod.wait_for_ready(api_key, pod_id, on_poll=on_pod_poll)
+
+        def on_health_poll(elapsed):
+            state["elapsed"] += 10
+            state["renderable"] = _status_panel(pod_id, "health", state["elapsed"])
+            live.update(state["renderable"])
+
+        await runpod.wait_for_health(endpoint, on_poll=on_health_poll)
+        state["renderable"] = _status_panel(pod_id, "ready", state["elapsed"])
+        live.update(state["renderable"])
+    return endpoint
 
 
-def _status_panel(pod_id: str, pod: dict, elapsed: int) -> Panel:
+def _status_panel(pod_id: str, phase: str, elapsed: int) -> Panel:
     mins, secs = divmod(elapsed, 60)
-    has_runtime = bool((pod or {}).get("runtime"))
-    phase = _start_phase(elapsed, has_runtime)
-    display_status = "vLLM ready" if has_runtime else "initializing"
+    status_map = {
+        "init":   ("initializing",       "yellow"),
+        "port":   ("port open",          "yellow"),
+        "health": ("loading model...",   "yellow"),
+        "ready":  ("vLLM ready",         "green"),
+    }
+    display_status, color = status_map.get(phase, ("initializing", "yellow"))
+    phase_msg = _start_phase(phase, elapsed)
     text = Text()
-    text.append(f"Pod:     ", style="dim")
+    text.append("Pod:     ", style="dim")
     text.append(f"{pod_id}\n", style="cyan")
-    text.append(f"Status:  ", style="dim")
-    text.append(f"{display_status}\n", style="green" if has_runtime else "yellow")
-    text.append(f"Elapsed: ", style="dim")
+    text.append("Status:  ", style="dim")
+    text.append(f"{display_status}\n", style=color)
+    text.append("Elapsed: ", style="dim")
     text.append(f"{mins:02d}:{secs:02d}\n", style="white")
-    text.append(f"\n{phase}", style="dim")
+    text.append(f"\n{phase_msg}", style="dim")
     return Panel(text, title="[bold]Starting vLLM on RunPod[/bold]", border_style="yellow")
 
 
-def _start_phase(elapsed: int, has_runtime: bool) -> str:
-    if has_runtime:
+def _start_phase(phase: str, elapsed: int) -> str:
+    if phase == "ready":
         return "✓ vLLM is up and responding."
+    if phase == "health":
+        return "⏳ Loading model weights into GPU memory..."
     if elapsed < 30:
         return "⏳ Pulling Docker image..."
     if elapsed < 90:

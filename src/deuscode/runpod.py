@@ -123,6 +123,25 @@ async def wait_for_ready(api_key: str, pod_id: str, on_poll=None) -> str:
     raise TimeoutError(f"Pod {pod_id} did not become ready within {_TIMEOUT_SECONDS}s")
 
 
+async def wait_for_health(endpoint: str, on_poll=None, timeout: int = 300) -> None:
+    """Poll GET /health until vLLM responds 200."""
+    url = f"{endpoint.rstrip('/')}/health"
+    elapsed = 0
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        while elapsed < timeout:
+            try:
+                r = await client.get(url)
+                if r.status_code == 200:
+                    return
+            except Exception:
+                pass
+            if on_poll:
+                on_poll(elapsed)
+            await asyncio.sleep(_POLL_INTERVAL)
+            elapsed += _POLL_INTERVAL
+    raise TimeoutError(f"vLLM did not respond at {url} within {timeout}s")
+
+
 def _extract_endpoint(pod: dict) -> str:
     pod_id = pod.get("id", "")
     for p in (pod.get("runtime") or {}).get("ports") or []:
