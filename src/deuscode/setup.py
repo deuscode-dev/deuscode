@@ -8,7 +8,7 @@ from rich.text import Text
 
 from deuscode import ui
 from deuscode.config import CONFIG_PATH
-from deuscode.models import MODELS, CUSTOM_MODEL_OPTION, _SIZE_OPTIONS
+from deuscode.models import MODELS, CUSTOM_MODEL_OPTION, _SIZE_OPTIONS, filter_by_size
 from deuscode import runpod
 
 _CLOUD_TYPES = [
@@ -97,7 +97,7 @@ def _pick_size() -> str:
 
 
 def _pick_model(size_filter: str = "ALL") -> dict | None:
-    pool = MODELS if size_filter == "ALL" else [m for m in MODELS if m["size"] == size_filter]
+    pool = filter_by_size(MODELS, size_filter)
     table = Table(title="Available Models" + (f" ({size_filter})" if size_filter != "ALL" else ""))
     for col in ("#", "Model", "Category", "VRAM", "Description"):
         table.add_column(col)
