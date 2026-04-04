@@ -14,6 +14,22 @@ _SYSTEM_BASE = (
 )
 
 
+async def run_agent(
+    prompt: str,
+    path: str = ".",
+    model_override: str | None = None,
+    no_map: bool = False,
+) -> None:
+    from deuscode.config import load_config
+    try:
+        config = load_config()
+    except FileNotFoundError as e:
+        ui.error(str(e))
+        return
+    result = await run(prompt, config, path=path, model_override=model_override, no_map=no_map)
+    ui.final_answer(result)
+
+
 async def run(
     prompt: str,
     config: Config,

@@ -1,56 +1,56 @@
+import sys
 import asyncio
 from typing import Optional
 
 import typer
 
 from deuscode import ui
-from deuscode.config import load_config
-from deuscode import agent
+from deuscode.agent import run_agent
 from deuscode.setup import run_setup_runpod, run_stop_runpod
 
-app = typer.Typer(invoke_without_command=True, help="Deus - AI-powered CLI coding assistant")
+app = typer.Typer(
+    name="deus",
+    help="Deus - AI-powered CLI coding assistant",
+    add_completion=False,
+    no_args_is_help=True,
+)
+
+setup_app = typer.Typer(help="Configure Deus endpoints and models.")
+app.add_typer(setup_app, name="setup")
 
 
-@app.callback(invoke_without_command=True)
-def main(
+@setup_app.callback(invoke_without_command=True)
+def setup_callback(
     ctx: typer.Context,
-    prompt: Optional[str] = typer.Argument(None, help="What to ask Deus"),
-    path: str = typer.Option(".", "--path", help="Repo path to map"),
-    model: Optional[str] = typer.Option(None, "--model", help="Override config model"),
-    no_map: bool = typer.Option(False, "--no-map", help="Skip repo-map generation"),
+    runpod: bool = typer.Option(False, "--runpod", help="Configure RunPod GPU endpoint"),
+    stop: bool = typer.Option(False, "--stop", help="Stop the current RunPod pod"),
 ) -> None:
     if ctx.invoked_subcommand is not None:
         return
-    if not prompt:
-        ui.error("Provide a prompt or use a subcommand (e.g. deus setup --runpod)")
-        raise typer.Exit(1)
-    try:
-        config = load_config()
-    except FileNotFoundError as e:
-        ui.error(str(e))
-        raise typer.Exit(1)
-    try:
-        result = asyncio.run(agent.run(prompt, config, path=path, model_override=model, no_map=no_map))
-        ui.final_answer(result)
-    except Exception as e:
-        ui.error(str(e))
-        raise typer.Exit(1)
-
-
-@app.command()
-def setup(
-    runpod: bool = typer.Option(False, "--runpod", help="Configure a RunPod GPU endpoint"),
-    stop: bool = typer.Option(False, "--stop", help="Stop the current RunPod pod"),
-) -> None:
-    """Configure Deus endpoints and models."""
     if stop:
         asyncio.run(run_stop_runpod())
     elif runpod:
         asyncio.run(run_setup_runpod())
     else:
         ui.error("Use --runpod to configure or --stop to stop pod")
-        raise typer.Exit(1)
+
+
+@app.command(name="ask", hidden=True)
+def ask(
+    prompt: str = typer.Argument(..., help="What to ask Deus"),
+    path: str = typer.Option(".", "--path", help="Repo path to map"),
+    model: Optional[str] = typer.Option(None, "--model", help="Override config model"),
+    no_map: bool = typer.Option(False, "--no-map", help="Skip repo-map"),
+) -> None:
+    asyncio.run(run_agent(prompt, path, model, no_map))
+
+
+def main() -> None:
+    known_subcommands = ["setup", "ask", "--help", "-h"]
+    if len(sys.argv) > 1 and sys.argv[1] not in known_subcommands:
+        sys.argv.insert(1, "ask")
+    app()
 
 
 if __name__ == "__main__":
-    app()
+    main()
