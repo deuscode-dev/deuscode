@@ -2,6 +2,8 @@ import asyncio
 
 import httpx
 
+from deuscode.models import tool_call_parser
+
 _API_URL = "https://api.runpod.io/graphql"
 _POLL_INTERVAL = 10
 _IDLE_TIMEOUT = 300  # seconds without any status change before giving up
@@ -39,6 +41,14 @@ async def get_gpu_types(api_key: str) -> list[dict]:
     ]
 
 
+def _docker_args(model_id: str) -> str:
+    args = f"--model {model_id} --trust-remote-code"
+    parser = tool_call_parser(model_id)
+    if parser:
+        args += f" --enable-auto-tool-choice --tool-call-parser {parser}"
+    return args
+
+
 async def start_pod(api_key: str, gpu_type_id: str, model_id: str, cloud_type: str = "ALL") -> dict:
     mutation = """
     mutation($input: PodFindAndDeployOnDemandInput!) {
@@ -61,7 +71,7 @@ async def start_pod(api_key: str, gpu_type_id: str, model_id: str, cloud_type: s
             "containerDiskInGb": 100,
             "volumeInGb": 0,
             "volumeMountPath": "/runpod-volume",
-            "dockerArgs": f"--model {model_id} --trust-remote-code",
+            "dockerArgs": _docker_args(model_id),
             "ports": "8000/http,22/tcp",
             "minVcpuCount": 1,
             "minMemoryInGb": 1,

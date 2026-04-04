@@ -114,6 +114,22 @@ MODELS: list[ModelEntry] = [
 
 CUSTOM_MODEL_OPTION = "Custom (type manually)"
 
+# vLLM --tool-call-parser value per model family
+_TOOL_CALL_PARSERS: dict[str, str] = {
+    "qwen":      "hermes",
+    "deepseek":  "hermes",
+    "llama":     "llama3_json",
+    "mistral":   "mistral",
+}
+
+
+def tool_call_parser(model_id: str) -> str | None:
+    lower = model_id.lower()
+    for family, parser in _TOOL_CALL_PARSERS.items():
+        if family in lower:
+            return parser
+    return None
+
 _SIZE_OPTIONS = [
     ("ALL",    "Show all models"),
     ("small",  "Small  (≤16 GB VRAM) — cheapest GPUs"),

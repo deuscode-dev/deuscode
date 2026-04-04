@@ -116,30 +116,45 @@ _RETRY_DELAYS = [5, 10, 20, 30, 60]
 
 
 async def _chat(client: httpx.AsyncClient, messages: list, model: str, config: Config) -> dict:
-    payload = {
-        "model": model,
-        "messages": messages,
-        "tools": tools.TOOL_SCHEMAS,
-        "max_tokens": config.max_tokens,
-    }
     url = f"{config.base_url.rstrip('/')}/chat/completions"
     headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
-    for attempt, delay in enumerate(_RETRY_DELAYS + [None]):
+    return await _post_with_retry(client, url, headers, messages, model, config, use_tools=True)
+
+
+async def _post_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict,
+    messages: list,
+    model: str,
+    config: Config,
+    use_tools: bool,
+) -> dict:
+    payload: dict = {"model": model, "messages": messages, "max_tokens": config.max_tokens}
+    if use_tools:
+        payload["tools"] = tools.TOOL_SCHEMAS
+
+    for delay in _RETRY_DELAYS + [None]:
         response = await client.post(url, headers=headers, json=payload)
         if response.status_code not in _RETRY_STATUSES:
             break
         if delay is None:
-            response.raise_for_status()
+            break
         ui.console.print(f"[dim]Server not ready ({response.status_code}), retrying in {delay}s...[/dim]")
         await asyncio.sleep(delay)
+
+    if response.status_code == 400 and use_tools:
+        body = response.text
+        if "tool" in body.lower():
+            ui.console.print("[dim]Tools not supported by this vLLM instance, retrying without tools...[/dim]")
+            return await _post_with_retry(client, url, headers, messages, model, config, use_tools=False)
+
     if not response.is_success:
         body = response.text[:300].strip()
         hint = ""
         if response.status_code == 404:
-            hint = "\n\nHint: vLLM may have started without a model. Stop this pod and run: deus setup --runpod"
-        raise RuntimeError(
-            f"HTTP {response.status_code} from {url}\n{body}{hint}"
-        )
+            hint = "\n\nHint: vLLM started without a model. Stop this pod and run: deus setup --runpod"
+        raise RuntimeError(f"HTTP {response.status_code} from {url}\n{body}{hint}")
     return response.json()
 
 
