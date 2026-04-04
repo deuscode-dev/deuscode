@@ -8,7 +8,7 @@ from rich.prompt import Confirm
 from rich.table import Table
 
 from deuscode import ui
-from deuscode.chat import run_run_chat_loop
+from deuscode.chat import run_chat_loop
 from deuscode.setup import run_setup_runpod, run_stop_runpod, run_connect_runpod
 from deuscode.config import CONFIG_PATH
 from deuscode.models import MODELS, get_models_by_size, CUSTOM_MODEL_OPTION
