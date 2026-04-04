@@ -114,17 +114,17 @@ async def _pick_gpu(api_key: str, min_vram: int, cloud_type: str) -> str:
 
 def _show_gpu_table(gpus: list[dict]) -> None:
     table = Table(title="Available GPUs")
-    for col in ("#", "GPU Name", "VRAM", "Community/hr", "Secure/hr", "Community", "Secure"):
+    for col in ("#", "GPU Name", "VRAM", "Live Price/hr", "Community/hr", "Secure/hr"):
         table.add_column(col)
     for i, g in enumerate(gpus, 1):
+        live = (g.get("lowestPrice") or {}).get("uninterruptablePrice")
         table.add_row(
             str(i),
             g.get("displayName", ""),
             f"{g.get('memoryInGb', '?')} GB",
+            f"${live}" if live is not None else "N/A",
             f"${g.get('communityPrice', '?')}",
             f"${g.get('securePrice', '?')}",
-            "✓" if g.get("communityCloud") else "✗",
-            "✓" if g.get("secureCloud") else "✗",
         )
     ui.console.print(table)
 

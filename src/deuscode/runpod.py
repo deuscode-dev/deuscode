@@ -33,7 +33,10 @@ async def get_gpu_types(api_key: str) -> list[dict]:
         r = await client.post(_API_URL, headers=_headers(api_key), json={"query": query})
         r.raise_for_status()
         gpus = r.json()["data"]["gpuTypes"]
-    return [g for g in gpus if g.get("secureCloud") or g.get("communityCloud")]
+    return [
+        g for g in gpus
+        if g.get("lowestPrice") and g["lowestPrice"].get("uninterruptablePrice") is not None
+    ]
 
 
 async def start_pod(api_key: str, gpu_type_id: str, model_id: str, cloud_type: str = "COMMUNITY") -> dict:
