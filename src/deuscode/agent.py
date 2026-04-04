@@ -132,7 +132,14 @@ async def _chat(client: httpx.AsyncClient, messages: list, model: str, config: C
             response.raise_for_status()
         ui.console.print(f"[dim]Server not ready ({response.status_code}), retrying in {delay}s...[/dim]")
         await asyncio.sleep(delay)
-    response.raise_for_status()
+    if not response.is_success:
+        body = response.text[:300].strip()
+        hint = ""
+        if response.status_code == 404:
+            hint = "\n\nHint: vLLM may have started without a model. Stop this pod and run: deus setup --runpod"
+        raise RuntimeError(
+            f"HTTP {response.status_code} from {url}\n{body}{hint}"
+        )
     return response.json()
 
 
