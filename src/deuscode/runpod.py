@@ -39,23 +39,32 @@ async def get_gpu_types(api_key: str) -> list[dict]:
     ]
 
 
-async def start_pod(api_key: str, gpu_type_id: str, model_id: str, cloud_type: str = "COMMUNITY") -> dict:
+async def start_pod(api_key: str, gpu_type_id: str, model_id: str, cloud_type: str = "ALL") -> dict:
     mutation = """
     mutation($input: PodFindAndDeployOnDemandInput!) {
       podFindAndDeployOnDemand(input: $input) {
         id
         desiredStatus
+        machine { podHostId }
       }
     }
     """
     variables = {
         "input": {
+            "name": "deus-vllm",
             "gpuTypeId": gpu_type_id,
+            "gpuCount": 1,
             "cloudType": cloud_type,
+            "supportPublicIp": True,
+            "startSsh": True,
             "imageName": "vllm/vllm-openai:latest",
-            "containerDiskInGb": 50,
-            "volumeInGb": 50,
-            "ports": "8000/http",
+            "containerDiskInGb": 100,
+            "volumeInGb": 0,
+            "volumeMountPath": "/runpod-volume",
+            "dockerArgs": "",
+            "ports": "8000/http,22/tcp",
+            "minVcpuCount": 1,
+            "minMemoryInGb": 1,
             "env": [
                 {"key": "MODEL_ID", "value": model_id},
                 {"key": "HUGGING_FACE_HUB_TOKEN", "value": ""},
@@ -66,7 +75,6 @@ async def start_pod(api_key: str, gpu_type_id: str, model_id: str, cloud_type: s
         r = await client.post(_API_URL, headers=_headers(api_key), json={"query": mutation, "variables": variables})
         r.raise_for_status()
         body = r.json()
-        print(f"[debug] start_pod response: {body}")
         if "errors" in body:
             msg = body["errors"][0].get("message", "Unknown RunPod error")
             raise RuntimeError(msg)

@@ -9,8 +9,9 @@ from deuscode.models import MODELS, CUSTOM_MODEL_OPTION
 from deuscode import runpod
 
 _CLOUD_TYPES = [
-    ("COMMUNITY", "Cheaper, less reliable availability"),
-    ("SECURE", "More expensive, better availability"),
+    ("ALL", "Search both Community and Secure (recommended)"),
+    ("COMMUNITY", "Community Cloud only — cheaper"),
+    ("SECURE", "Secure Cloud only — more reliable"),
 ]
 
 
