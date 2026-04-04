@@ -5,14 +5,14 @@ from typing import Optional
 import typer
 
 from deuscode import ui
-from deuscode.agent import run_agent
+from deuscode.agent import run_agent, chat_loop
 from deuscode.setup import run_setup_runpod, run_stop_runpod
 
 app = typer.Typer(
     name="deus",
     help="Deus - AI-powered CLI coding assistant",
     add_completion=False,
-    no_args_is_help=True,
+    no_args_is_help=False,
 )
 
 setup_app = typer.Typer(help="Configure Deus endpoints and models.")
@@ -54,9 +54,13 @@ def ask(
 
 
 def main() -> None:
-    known_subcommands = ["setup", "ask", "--help", "-h"]
-    if len(sys.argv) > 1 and sys.argv[1] not in known_subcommands:
-        sys.argv.insert(1, "ask")
+    if len(sys.argv) == 1:
+        _run(chat_loop())
+        return
+    known_subcommands = {"setup", "ask", "--help", "-h", "--version"}
+    if sys.argv[1] not in known_subcommands:
+        prompt = " ".join(sys.argv[1:])
+        sys.argv[1:] = ["ask", prompt]
     app()
 
 

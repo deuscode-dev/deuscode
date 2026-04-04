@@ -30,6 +30,39 @@ async def run_agent(
     ui.final_answer(result)
 
 
+async def chat_loop(
+    path: str = ".",
+    model_override: str | None = None,
+    no_map: bool = False,
+) -> None:
+    from deuscode.config import load_config
+    from rich.prompt import Prompt
+    try:
+        config = load_config()
+    except FileNotFoundError as e:
+        ui.error(str(e))
+        return
+    model = model_override or config.model
+    system_prompt = _build_system_prompt(path, no_map)
+    messages: list = [{"role": "system", "content": system_prompt}]
+    ui.console.print(f"[bold green]Deus[/bold green] [dim]{model}[/dim]  (Ctrl+C or empty line to exit)\n")
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        while True:
+            try:
+                prompt = Prompt.ask("[bold cyan]you[/bold cyan]")
+            except (EOFError, KeyboardInterrupt):
+                ui.console.print("\n[dim]Goodbye.[/dim]")
+                break
+            if not prompt.strip():
+                ui.console.print("[dim]Goodbye.[/dim]")
+                break
+            messages.append({"role": "user", "content": prompt})
+            ui.thinking(model)
+            result = await _loop(client, messages, model, config)
+            ui.final_answer(result)
+    await _maybe_auto_stop(config)
+
+
 async def run(
     prompt: str,
     config: Config,
