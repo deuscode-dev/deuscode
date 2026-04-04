@@ -23,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-deus = "deuscode.main:app"
+deus = "deuscode.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/deuscode"]
