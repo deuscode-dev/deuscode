@@ -61,14 +61,11 @@ async def start_pod(api_key: str, gpu_type_id: str, model_id: str, cloud_type: s
             "containerDiskInGb": 100,
             "volumeInGb": 0,
             "volumeMountPath": "/runpod-volume",
-            "dockerArgs": "",
+            "dockerArgs": f"--model {model_id} --trust-remote-code",
             "ports": "8000/http,22/tcp",
             "minVcpuCount": 1,
             "minMemoryInGb": 1,
-            "env": [
-                {"key": "MODEL_ID", "value": model_id},
-                {"key": "HUGGING_FACE_HUB_TOKEN", "value": ""},
-            ],
+            "env": [],
         }
     }
     async with httpx.AsyncClient(timeout=30.0) as client:
