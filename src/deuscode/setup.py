@@ -1,4 +1,5 @@
 import yaml
+import typer
 from rich.prompt import Prompt, Confirm, IntPrompt
 from rich.table import Table
 
@@ -103,6 +104,9 @@ def _pick_cloud_type() -> str:
 async def _pick_gpu(api_key: str, min_vram: int, cloud_type: str) -> str:
     gpus = await runpod.get_gpu_types(api_key)
     filtered = [g for g in gpus if (g.get("memoryInGb") or 0) >= min_vram]
+    if not filtered:
+        ui.error("No GPUs currently available on RunPod. Try again later.")
+        raise typer.Exit(1)
     _show_gpu_table(filtered)
     choice = IntPrompt.ask("Pick a GPU", default=1)
     return filtered[choice - 1]["id"]
@@ -110,7 +114,7 @@ async def _pick_gpu(api_key: str, min_vram: int, cloud_type: str) -> str:
 
 def _show_gpu_table(gpus: list[dict]) -> None:
     table = Table(title="Available GPUs")
-    for col in ("#", "GPU Name", "VRAM", "Community/hr", "Secure/hr"):
+    for col in ("#", "GPU Name", "VRAM", "Community/hr", "Secure/hr", "Community", "Secure"):
         table.add_column(col)
     for i, g in enumerate(gpus, 1):
         table.add_row(
@@ -119,6 +123,8 @@ def _show_gpu_table(gpus: list[dict]) -> None:
             f"{g.get('memoryInGb', '?')} GB",
             f"${g.get('communityPrice', '?')}",
             f"${g.get('securePrice', '?')}",
+            "✓" if g.get("communityCloud") else "✗",
+            "✓" if g.get("secureCloud") else "✗",
         )
     ui.console.print(table)
 

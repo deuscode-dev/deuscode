@@ -20,13 +20,20 @@ async def get_gpu_types(api_key: str) -> list[dict]:
         memoryInGb
         securePrice
         communityPrice
+        lowestPrice(input: { gpuCount: 1 }) {
+          minimumBidPrice
+          uninterruptablePrice
+        }
+        secureCloud
+        communityCloud
       }
     }
     """
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.post(_API_URL, headers=_headers(api_key), json={"query": query})
         r.raise_for_status()
-        return r.json()["data"]["gpuTypes"]
+        gpus = r.json()["data"]["gpuTypes"]
+    return [g for g in gpus if g.get("secureCloud") or g.get("communityCloud")]
 
 
 async def start_pod(api_key: str, gpu_type_id: str, model_id: str, cloud_type: str = "COMMUNITY") -> dict:
