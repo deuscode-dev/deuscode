@@ -26,5 +26,9 @@ def error(text: str) -> None:
     console.print(Panel(text, title="[bold red]Error[/bold red]", border_style="red"))
 
 
+def warning(text: str) -> None:
+    console.print(f"[bold yellow]⚠ {text}[/bold yellow]")
+
+
 def confirm(prompt: str) -> bool:
     return Confirm.ask(prompt)

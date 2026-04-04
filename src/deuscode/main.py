@@ -20,12 +20,11 @@ app.add_typer(setup_app, name="setup")
 
 
 def _run(coro):
+    loop = asyncio.new_event_loop()
     try:
-        asyncio.get_running_loop()
-        raise RuntimeError("Cannot call _run inside a running event loop")
-    except RuntimeError:
-        pass
-    return asyncio.run(coro)
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 @setup_app.callback(invoke_without_command=True)

@@ -1,5 +1,5 @@
 import yaml
-from rich.prompt import Prompt, Confirm
+from rich.prompt import Prompt, Confirm, IntPrompt
 from rich.table import Table
 
 from deuscode import ui
@@ -14,25 +14,31 @@ async def run_setup_runpod() -> None:
     model_id = model_entry["id"] if model_entry else Prompt.ask("Enter model ID")
     vram_needed = model_entry["vram_gb"] if model_entry else 0
 
-    ui.console.print(f"\n[dim]Fetching GPUs with ≥{vram_needed} GB VRAM...[/dim]")
-    gpus = await runpod.get_gpu_types(api_key)
-    filtered = [g for g in gpus if (g.get("memoryInGb") or 0) >= vram_needed]
-    gpu = _pick_gpu(filtered)
-
-    price = gpu.get("securePrice") or "?"
-    if not Confirm.ask(f"This will cost ~${price}/hr. Continue?", default=False):
+    if not Confirm.ask("Start a RunPod pod? This will incur costs. Continue?", default=False):
         ui.console.print("[dim]Aborted.[/dim]")
         return
 
     auto_stop = Confirm.ask("Auto-stop RunPod pod after each prompt completes?", default=False)
+    gpu_id = await _pick_gpu(api_key, vram_needed)
 
-    pod_id = await _start_with_spinner(api_key, gpu["id"], model_id)
+    while True:
+        try:
+            pod_id = await _start_with_spinner(api_key, gpu_id, model_id)
+            break
+        except RuntimeError as e:
+            if "no longer any instances available" in str(e).lower() or \
+               "supply" in str(e).lower():
+                ui.warning("GPU unavailable. Please pick a different one.")
+                gpu_id = await _pick_gpu(api_key, vram_needed)
+            else:
+                raise
+
     endpoint = await _wait_with_spinner(api_key, pod_id)
     _save_config(endpoint, api_key, model_id, pod_id, auto_stop)
     ui.final_answer(
         f"✓ Deus is ready. Run: deus 'your prompt'\n\n"
         f"⚠ Stop your pod manually anytime: deus setup --stop\n"
-        f"Current pod: {pod_id} (~${price}/hr)"
+        f"Current pod: {pod_id}"
     )
 
 
@@ -50,7 +56,6 @@ async def run_stop_runpod() -> None:
     try:
         success = await runpod.stop_pod(api_key, pod_id)
     except Exception as e:
-        success = False
         ui.error(f"Failed to stop pod {pod_id}: {e}\nStop manually at runpod.io/console")
         return
     if success:
@@ -74,15 +79,21 @@ def _pick_model() -> dict | None:
     return ordered[idx] if idx < len(ordered) else None
 
 
-def _pick_gpu(gpus: list[dict]) -> dict:
+async def _pick_gpu(api_key: str, min_vram: int) -> str:
+    gpus = await runpod.get_gpu_types(api_key)
+    filtered = [g for g in gpus if (g.get("memoryInGb") or 0) >= min_vram]
+    _show_gpu_table(filtered)
+    choice = IntPrompt.ask("Pick a GPU", default=1)
+    return filtered[choice - 1]["id"]
+
+
+def _show_gpu_table(gpus: list[dict]) -> None:
     table = Table(title="Available GPUs")
     for col in ("#", "GPU Name", "VRAM", "Price/hr"):
         table.add_column(col)
     for i, g in enumerate(gpus, 1):
         table.add_row(str(i), g.get("displayName", ""), f"{g.get('memoryInGb', '?')} GB", f"${g.get('securePrice', '?')}")
     ui.console.print(table)
-    idx = int(Prompt.ask("Pick a GPU", default="1")) - 1
-    return gpus[idx]
 
 
 async def _start_with_spinner(api_key: str, gpu_id: str, model_id: str) -> str:
