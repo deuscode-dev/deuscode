@@ -101,7 +101,7 @@ def _pick_cloud_type() -> str:
 
 
 async def _pick_gpu(api_key: str, min_vram: int, cloud_type: str) -> str:
-    gpus = await runpod.get_gpu_types(api_key, cloud_type)
+    gpus = await runpod.get_gpu_types(api_key)
     filtered = [g for g in gpus if (g.get("memoryInGb") or 0) >= min_vram]
     _show_gpu_table(filtered)
     choice = IntPrompt.ask("Pick a GPU", default=1)
@@ -110,10 +110,16 @@ async def _pick_gpu(api_key: str, min_vram: int, cloud_type: str) -> str:
 
 def _show_gpu_table(gpus: list[dict]) -> None:
     table = Table(title="Available GPUs")
-    for col in ("#", "GPU Name", "VRAM", "Price/hr"):
+    for col in ("#", "GPU Name", "VRAM", "Community/hr", "Secure/hr"):
         table.add_column(col)
     for i, g in enumerate(gpus, 1):
-        table.add_row(str(i), g.get("displayName", ""), f"{g.get('memoryInGb', '?')} GB", f"${g.get('securePrice', '?')}")
+        table.add_row(
+            str(i),
+            g.get("displayName", ""),
+            f"{g.get('memoryInGb', '?')} GB",
+            f"${g.get('communityPrice', '?')}",
+            f"${g.get('securePrice', '?')}",
+        )
     ui.console.print(table)
 
 

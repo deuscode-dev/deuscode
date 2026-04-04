@@ -11,10 +11,10 @@ def _headers(api_key: str) -> dict:
     return {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
 
-async def get_gpu_types(api_key: str, cloud_type: str = "COMMUNITY") -> list[dict]:
+async def get_gpu_types(api_key: str) -> list[dict]:
     query = """
-    query($cloudType: String) {
-      gpuTypes(input: { cloudType: $cloudType }) {
+    {
+      gpuTypes {
         id
         displayName
         memoryInGb
@@ -24,7 +24,7 @@ async def get_gpu_types(api_key: str, cloud_type: str = "COMMUNITY") -> list[dic
     }
     """
     async with httpx.AsyncClient(timeout=30.0) as client:
-        r = await client.post(_API_URL, headers=_headers(api_key), json={"query": query, "variables": {"cloudType": cloud_type}})
+        r = await client.post(_API_URL, headers=_headers(api_key), json={"query": query})
         r.raise_for_status()
         return r.json()["data"]["gpuTypes"]
 
