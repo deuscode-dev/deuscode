@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import httpx
@@ -110,17 +111,27 @@ async def _loop(client: httpx.AsyncClient, messages: list, model: str, config: C
             })
 
 
+_RETRY_STATUSES = {502, 503, 504}
+_RETRY_DELAYS = [5, 10, 20, 30, 60]
+
+
 async def _chat(client: httpx.AsyncClient, messages: list, model: str, config: Config) -> dict:
-    response = await client.post(
-        f"{config.base_url.rstrip('/')}/chat/completions",
-        headers={"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"},
-        json={
-            "model": model,
-            "messages": messages,
-            "tools": tools.TOOL_SCHEMAS,
-            "max_tokens": config.max_tokens,
-        },
-    )
+    payload = {
+        "model": model,
+        "messages": messages,
+        "tools": tools.TOOL_SCHEMAS,
+        "max_tokens": config.max_tokens,
+    }
+    url = f"{config.base_url.rstrip('/')}/chat/completions"
+    headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
+    for attempt, delay in enumerate(_RETRY_DELAYS + [None]):
+        response = await client.post(url, headers=headers, json=payload)
+        if response.status_code not in _RETRY_STATUSES:
+            break
+        if delay is None:
+            response.raise_for_status()
+        ui.console.print(f"[dim]Server not ready ({response.status_code}), retrying in {delay}s...[/dim]")
+        await asyncio.sleep(delay)
     response.raise_for_status()
     return response.json()
 
