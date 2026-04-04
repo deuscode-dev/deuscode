@@ -1,3 +1,4 @@
+import httpx
 import yaml
 import typer
 from rich.prompt import Prompt, Confirm, IntPrompt
@@ -91,8 +92,12 @@ async def run_connect_runpod() -> None:
         endpoint = f"https://{pod_id}-8000.proxy.runpod.net"
         ui.console.print(f"[dim]Using proxy endpoint: {endpoint}[/dim]")
 
-    model_entry = _pick_model(_pick_size())
-    model_id = model_entry["id"] if model_entry else Prompt.ask("Enter model ID")
+    installed = await _fetch_installed_models(endpoint)
+    if installed:
+        ui.console.print(f"[dim]Found {len(installed)} model(s) already on this pod.[/dim]")
+    else:
+        ui.console.print("[dim]Could not reach vLLM — showing full catalogue.[/dim]")
+    model_id = _pick_model_connect(installed, _pick_size())
     auto_stop = Confirm.ask("Auto-stop pod after each prompt completes?", default=False)
 
     _save_config(endpoint, api_key, model_id, pod_id, auto_stop, "ALL")
@@ -150,6 +155,59 @@ def _pick_model(size_filter: str = "ALL") -> dict | None:
     ui.console.print(table)
     idx = int(Prompt.ask("Pick a model", default="1")) - 1
     return ordered[idx] if idx < len(ordered) else None
+
+
+async def _fetch_installed_models(endpoint: str) -> list[str]:
+    """Return model IDs currently served by the vLLM instance, or [] on any error."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(f"{endpoint.rstrip('/')}/v1/models")
+            if r.status_code == 200:
+                return [m["id"] for m in r.json().get("data", [])]
+    except Exception:
+        pass
+    return []
+
+
+def _pick_model_connect(installed: list[str], size_filter: str = "ALL") -> str:
+    """Model picker for connect flow: installed models first, then the catalogue."""
+    known = {m["id"]: m for m in MODELS}
+    pool = filter_by_size(MODELS, size_filter)
+    pool_ids = {m["id"] for m in pool}
+
+    table = Table(title="Select Model")
+    for col in ("#", "Model", "Category", "VRAM", "Status"):
+        table.add_column(col)
+
+    rows: list[str] = []  # model IDs in display order
+
+    # ── installed first ───────────────────────────────────────────────────
+    for mid in installed:
+        m = known.get(mid)
+        label = m["label"] if m else mid
+        category = m["category"] if m else "?"
+        vram = f"{m['vram_gb']} GB" if m else "?"
+        table.add_row(str(len(rows) + 1), label, category, vram, "[green]installed[/green]")
+        rows.append(mid)
+
+    # ── catalogue (skip already listed) ──────────────────────────────────
+    ordered = sorted(pool, key=lambda m: (0 if m["category"] == "Coding" else 1, m["label"]))
+    for m in ordered:
+        if m["id"] in rows:
+            continue
+        table.add_row(str(len(rows) + 1), m["label"], m["category"], f"{m['vram_gb']} GB", "[dim]download[/dim]")
+        rows.append(m["id"])
+
+    # ── custom entry ──────────────────────────────────────────────────────
+    custom_idx = len(rows) + 1
+    table.add_row(str(custom_idx), CUSTOM_MODEL_OPTION, "", "", "")
+
+    ui.console.print(table)
+    default = "1"
+    idx = int(Prompt.ask("Pick a model", default=default)) - 1
+    if idx >= len(rows):
+        return Prompt.ask("Enter model ID")
+    return rows[idx]
 
 
 def _load_saved_api_key() -> str:
