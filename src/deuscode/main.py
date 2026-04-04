@@ -1,6 +1,5 @@
 import sys
 import asyncio
-import concurrent.futures
 from typing import Optional
 
 import typer
@@ -22,15 +21,11 @@ app.add_typer(setup_app, name="setup")
 
 def _run(coro):
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, coro)
-                return future.result()
-        else:
-            return loop.run_until_complete(coro)
+        asyncio.get_running_loop()
+        raise RuntimeError("Cannot call _run inside a running event loop")
     except RuntimeError:
-        return asyncio.run(coro)
+        pass
+    return asyncio.run(coro)
 
 
 @setup_app.callback(invoke_without_command=True)

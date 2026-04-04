@@ -56,7 +56,8 @@ async def start_pod(api_key: str, gpu_type_id: str, model_id: str) -> dict:
         body = r.json()
         print(f"[debug] start_pod response: {body}")
         if "errors" in body:
-            raise RuntimeError(f"RunPod API error: {body['errors']}")
+            msg = body["errors"][0].get("message", "Unknown RunPod error")
+            raise RuntimeError(msg)
         if not body.get("data"):
             raise RuntimeError(f"RunPod returned unexpected response: {body}")
         return body["data"]["podFindAndDeployOnDemand"]
