@@ -15,23 +15,8 @@ _SYSTEM_BASE = (
 )
 
 
-async def run_agent(
-    prompt: str,
-    path: str = ".",
-    model_override: str | None = None,
-    no_map: bool = False,
-) -> None:
-    from deuscode.config import load_config
-    try:
-        config = load_config()
-    except FileNotFoundError as e:
-        ui.error(str(e))
-        return
-    result = await run(prompt, config, path=path, model_override=model_override, no_map=no_map)
-    ui.final_answer(result)
-
-
 async def chat_loop(
+    initial_prompt: str | None = None,
     path: str = ".",
     model_override: str | None = None,
     no_map: bool = False,
@@ -48,16 +33,22 @@ async def chat_loop(
     messages: list = [{"role": "system", "content": system_prompt}]
     ui.console.print(f"[bold green]Deus[/bold green] [dim]{model}[/dim]  (Ctrl+C or empty line to exit)\n")
     async with httpx.AsyncClient(timeout=120.0) as client:
+        pending = initial_prompt
         while True:
-            try:
-                prompt = Prompt.ask("[bold cyan]you[/bold cyan]")
-            except (EOFError, KeyboardInterrupt):
-                ui.console.print("\n[dim]Goodbye.[/dim]")
-                break
-            if not prompt.strip():
-                ui.console.print("[dim]Goodbye.[/dim]")
-                break
-            messages.append({"role": "user", "content": prompt})
+            if pending is not None:
+                user_input = pending
+                pending = None
+                ui.console.print(f"[bold cyan]you[/bold cyan]: {user_input}")
+            else:
+                try:
+                    user_input = Prompt.ask("[bold cyan]you[/bold cyan]")
+                except (EOFError, KeyboardInterrupt):
+                    ui.console.print("\n[dim]Goodbye.[/dim]")
+                    break
+                if not user_input.strip():
+                    ui.console.print("[dim]Goodbye.[/dim]")
+                    break
+            messages.append({"role": "user", "content": user_input})
             ui.thinking(model)
             result = await _loop(client, messages, model, config)
             ui.final_answer(result)

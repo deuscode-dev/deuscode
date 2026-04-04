@@ -5,7 +5,7 @@ from typing import Optional
 import typer
 
 from deuscode import ui
-from deuscode.agent import run_agent, chat_loop
+from deuscode.agent import chat_loop
 from deuscode.setup import run_setup_runpod, run_stop_runpod, run_connect_runpod
 
 app = typer.Typer(
@@ -61,12 +61,12 @@ def connect_callback(
 
 @app.command(name="ask", hidden=True)
 def ask(
-    prompt: str = typer.Argument(..., help="What to ask Deus"),
+    prompt: str = typer.Argument(..., help="Initial prompt"),
     path: str = typer.Option(".", "--path", help="Repo path to map"),
     model: Optional[str] = typer.Option(None, "--model", help="Override config model"),
     no_map: bool = typer.Option(False, "--no-map", help="Skip repo-map"),
 ) -> None:
-    _run(run_agent(prompt, path, model, no_map))
+    _run(chat_loop(initial_prompt=prompt, path=path, model_override=model, no_map=no_map))
 
 
 def main() -> None:
