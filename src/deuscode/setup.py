@@ -1,11 +1,6 @@
-import asyncio
-
 import yaml
 from rich.prompt import Prompt, Confirm
 from rich.table import Table
-from rich.live import Live
-from rich.spinner import Spinner
-from rich.text import Text
 
 from deuscode import ui
 from deuscode.config import CONFIG_PATH
@@ -29,10 +24,41 @@ async def run_setup_runpod() -> None:
         ui.console.print("[dim]Aborted.[/dim]")
         return
 
+    auto_stop = Confirm.ask("Auto-stop RunPod pod after each prompt completes?", default=False)
+
     pod_id = await _start_with_spinner(api_key, gpu["id"], model_id)
     endpoint = await _wait_with_spinner(api_key, pod_id)
-    _save_config(endpoint, api_key, model_id, pod_id)
-    ui.final_answer(f"✓ Deus is ready. Run: deus 'your prompt'")
+    _save_config(endpoint, api_key, model_id, pod_id, auto_stop)
+    ui.final_answer(
+        f"✓ Deus is ready. Run: deus 'your prompt'\n\n"
+        f"⚠ Stop your pod manually anytime: deus setup --stop\n"
+        f"Current pod: {pod_id} (~${price}/hr)"
+    )
+
+
+async def run_stop_runpod() -> None:
+    if not CONFIG_PATH.exists():
+        ui.error("No active RunPod pod found in ~/.deus/config.yaml")
+        return
+    config_data = yaml.safe_load(CONFIG_PATH.read_text()) or {}
+    pod_id = config_data.get("runpod_pod_id")
+    if not pod_id:
+        ui.error("No active RunPod pod found in ~/.deus/config.yaml")
+        return
+    api_key = config_data.get("runpod_api_key", "")
+    ui.console.print(f"[dim]Stopping pod {pod_id}...[/dim]")
+    try:
+        success = await runpod.stop_pod(api_key, pod_id)
+    except Exception as e:
+        success = False
+        ui.error(f"Failed to stop pod {pod_id}: {e}\nStop manually at runpod.io/console")
+        return
+    if success:
+        config_data.pop("runpod_pod_id", None)
+        CONFIG_PATH.write_text(yaml.dump(config_data, default_flow_style=False))
+        ui.final_answer("✓ Pod stopped. No more charges.")
+    else:
+        ui.error(f"Failed to stop pod {pod_id}.\nStop manually at runpod.io/console")
 
 
 def _pick_model() -> dict | None:
@@ -70,7 +96,7 @@ async def _wait_with_spinner(api_key: str, pod_id: str) -> str:
     return await runpod.wait_for_ready(api_key, pod_id)
 
 
-def _save_config(endpoint: str, api_key: str, model_id: str, pod_id: str) -> None:
+def _save_config(endpoint: str, api_key: str, model_id: str, pod_id: str, auto_stop: bool) -> None:
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     existing = yaml.safe_load(CONFIG_PATH.read_text()) if CONFIG_PATH.exists() else {}
     existing.update({
@@ -79,5 +105,6 @@ def _save_config(endpoint: str, api_key: str, model_id: str, pod_id: str) -> Non
         "model": model_id,
         "runpod_pod_id": pod_id,
         "runpod_api_key": api_key,
+        "auto_stop_runpod": auto_stop,
     })
     CONFIG_PATH.write_text(yaml.dump(existing, default_flow_style=False))

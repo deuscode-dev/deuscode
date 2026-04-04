@@ -6,7 +6,7 @@ import typer
 from deuscode import ui
 from deuscode.config import load_config
 from deuscode import agent
-from deuscode.setup import run_setup_runpod
+from deuscode.setup import run_setup_runpod, run_stop_runpod
 
 app = typer.Typer(invoke_without_command=True, help="Deus - AI-powered CLI coding assistant")
 
@@ -40,12 +40,16 @@ def main(
 @app.command()
 def setup(
     runpod: bool = typer.Option(False, "--runpod", help="Configure a RunPod GPU endpoint"),
+    stop: bool = typer.Option(False, "--stop", help="Stop the current RunPod pod"),
 ) -> None:
     """Configure Deus endpoints and models."""
-    if not runpod:
-        ui.error("Specify --runpod to configure a RunPod endpoint")
+    if stop:
+        asyncio.run(run_stop_runpod())
+    elif runpod:
+        asyncio.run(run_setup_runpod())
+    else:
+        ui.error("Use --runpod to configure or --stop to stop pod")
         raise typer.Exit(1)
-    asyncio.run(run_setup_runpod())
 
 
 if __name__ == "__main__":

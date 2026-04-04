@@ -10,6 +10,7 @@ _DEFAULTS = {
     "api_key": "your-key",
     "model": "your-model-name",
     "max_tokens": 8192,
+    "auto_stop_runpod": False,
 }
 
 
@@ -19,6 +20,7 @@ class Config:
     api_key: str
     model: str
     max_tokens: int
+    auto_stop_runpod: bool = False
 
 
 def load_config() -> Config:
@@ -34,6 +36,7 @@ def load_config() -> Config:
         api_key=merged["api_key"],
         model=merged["model"],
         max_tokens=int(merged["max_tokens"]),
+        auto_stop_runpod=bool(merged.get("auto_stop_runpod", False)),
     )
 
 

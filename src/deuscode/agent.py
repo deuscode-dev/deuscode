@@ -1,10 +1,11 @@
 import json
 
 import httpx
+import yaml
 
-from deuscode.config import Config
+from deuscode.config import Config, CONFIG_PATH
 from deuscode.repomap import generate_repo_map
-from deuscode import tools, ui
+from deuscode import tools, ui, runpod
 
 _SYSTEM_BASE = (
     "You are Deus, an AI coding assistant. "
@@ -28,7 +29,9 @@ async def run(
     ]
     ui.thinking(model)
     async with httpx.AsyncClient(timeout=120.0) as client:
-        return await _loop(client, messages, model, config)
+        result = await _loop(client, messages, model, config)
+    await _maybe_auto_stop(config)
+    return result
 
 
 def _build_system_prompt(path: str, no_map: bool) -> str:
@@ -79,3 +82,19 @@ async def _execute_tool(tc: dict) -> str:
     result = await tools.dispatch(fn["name"], fn.get("arguments", "{}"))
     ui.tool_result(result[:500])
     return result
+
+
+async def _maybe_auto_stop(config: Config) -> None:
+    if not config.auto_stop_runpod:
+        return
+    raw = yaml.safe_load(CONFIG_PATH.read_text()) if CONFIG_PATH.exists() else {}
+    pod_id = raw.get("runpod_pod_id")
+    api_key = raw.get("runpod_api_key", "")
+    if not pod_id:
+        return
+    ui.console.print(f"[bold yellow]⚡ Auto-stopping RunPod pod {pod_id}...[/bold yellow]")
+    try:
+        await runpod.stop_pod(api_key, pod_id)
+        ui.console.print("[green]✓ Pod stopped. No more charges.[/green]")
+    except Exception as e:
+        ui.console.print(f"[red]Warning: could not stop pod {pod_id}: {e}[/red]")
