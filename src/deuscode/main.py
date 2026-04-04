@@ -6,7 +6,7 @@ import typer
 
 from deuscode import ui
 from deuscode.agent import run_agent, chat_loop
-from deuscode.setup import run_setup_runpod, run_stop_runpod
+from deuscode.setup import run_setup_runpod, run_stop_runpod, run_connect_runpod
 
 app = typer.Typer(
     name="deus",
@@ -17,6 +17,9 @@ app = typer.Typer(
 
 setup_app = typer.Typer(help="Configure Deus endpoints and models.")
 app.add_typer(setup_app, name="setup")
+
+connect_app = typer.Typer(help="Connect to an existing endpoint.")
+app.add_typer(connect_app, name="connect")
 
 
 def _run(coro):
@@ -43,6 +46,19 @@ def setup_callback(
         ui.error("Use --runpod to configure or --stop to stop pod")
 
 
+@connect_app.callback(invoke_without_command=True)
+def connect_callback(
+    ctx: typer.Context,
+    runpod: bool = typer.Option(False, "--runpod", help="Connect to an existing RunPod pod by ID"),
+) -> None:
+    if ctx.invoked_subcommand is not None:
+        return
+    if runpod:
+        _run(run_connect_runpod())
+    else:
+        ui.error("Use --runpod to connect to an existing RunPod pod")
+
+
 @app.command(name="ask", hidden=True)
 def ask(
     prompt: str = typer.Argument(..., help="What to ask Deus"),
@@ -57,7 +73,7 @@ def main() -> None:
     if len(sys.argv) == 1:
         _run(chat_loop())
         return
-    known_subcommands = {"setup", "ask", "--help", "-h", "--version"}
+    known_subcommands = {"setup", "connect", "ask", "--help", "-h", "--version"}
     if sys.argv[1] not in known_subcommands:
         prompt = " ".join(sys.argv[1:])
         sys.argv[1:] = ["ask", prompt]

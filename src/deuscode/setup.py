@@ -61,6 +61,48 @@ async def run_setup_runpod() -> None:
     )
 
 
+async def run_connect_runpod() -> None:
+    api_key = _load_saved_api_key()
+    if api_key:
+        ui.console.print(f"[dim]Using saved RunPod API key (••••{api_key[-4:]})[/dim]")
+    else:
+        api_key = Prompt.ask("[bold]RunPod API key[/bold]", password=True)
+
+    pod_id = Prompt.ask("[bold]Pod ID[/bold]")
+
+    ui.console.print(f"[dim]Looking up pod {pod_id}...[/dim]")
+    try:
+        pod = await runpod.get_pod(api_key, pod_id)
+    except Exception as e:
+        ui.error(str(e))
+        return
+
+    status = pod.get("desiredStatus", "unknown")
+    has_runtime = bool(pod.get("runtime"))
+    ui.console.print(f"[dim]Pod status: {status}, runtime: {'yes' if has_runtime else 'no'}[/dim]")
+
+    if not has_runtime:
+        ui.warning("Pod has no active runtime — it may still be starting or is stopped.")
+        if not Confirm.ask("Continue anyway?", default=False):
+            return
+
+    endpoint = runpod._extract_endpoint(pod) if has_runtime else ""
+    if not endpoint:
+        endpoint = f"https://{pod_id}-8000.proxy.runpod.net"
+        ui.console.print(f"[dim]Using proxy endpoint: {endpoint}[/dim]")
+
+    model_entry = _pick_model(_pick_size())
+    model_id = model_entry["id"] if model_entry else Prompt.ask("Enter model ID")
+    auto_stop = Confirm.ask("Auto-stop pod after each prompt completes?", default=False)
+
+    _save_config(endpoint, api_key, model_id, pod_id, auto_stop, "ALL")
+    ui.final_answer(
+        f"✓ Connected to pod {pod_id}\n\n"
+        f"Run: deus 'your prompt'\n"
+        f"Stop anytime: deus setup --stop"
+    )
+
+
 async def run_stop_runpod() -> None:
     if not CONFIG_PATH.exists():
         ui.error("No active RunPod pod found in ~/.deus/config.yaml")

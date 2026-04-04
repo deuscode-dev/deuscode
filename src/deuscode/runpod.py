@@ -80,6 +80,28 @@ async def start_pod(api_key: str, gpu_type_id: str, model_id: str, cloud_type: s
         return body["data"]["podFindAndDeployOnDemand"]
 
 
+async def get_pod(api_key: str, pod_id: str) -> dict:
+    query = """
+    query($podId: String!) {
+      pod(input: { podId: $podId }) {
+        id
+        desiredStatus
+        runtime { ports { ip isIpPublic privatePort publicPort type } }
+      }
+    }
+    """
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        r = await client.post(_API_URL, headers=_headers(api_key), json={"query": query, "variables": {"podId": pod_id}})
+        r.raise_for_status()
+        body = r.json()
+        if body.get("errors"):
+            raise RuntimeError(body["errors"][0]["message"])
+        pod = body["data"]["pod"]
+        if not pod:
+            raise RuntimeError(f"Pod {pod_id!r} not found")
+        return pod
+
+
 async def stop_pod(api_key: str, pod_id: str) -> bool:
     mutation = """
     mutation($input: PodTerminateInput!) {
