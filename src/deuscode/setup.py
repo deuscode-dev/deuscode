@@ -8,7 +8,7 @@ from rich.text import Text
 
 from deuscode import ui
 from deuscode.config import CONFIG_PATH
-from deuscode.models import MODELS, CUSTOM_MODEL_OPTION
+from deuscode.models import MODELS, CUSTOM_MODEL_OPTION, _SIZE_OPTIONS
 from deuscode import runpod
 
 _CLOUD_TYPES = [
@@ -24,7 +24,7 @@ async def run_setup_runpod() -> None:
         ui.console.print(f"[dim]Using saved RunPod API key (••••{api_key[-4:]})[/dim]")
     else:
         api_key = Prompt.ask("[bold]RunPod API key[/bold]", password=True)
-    model_entry = _pick_model()
+    model_entry = _pick_model(_pick_size())
     model_id = model_entry["id"] if model_entry else Prompt.ask("Enter model ID")
     vram_needed = model_entry["vram_gb"] if model_entry else 0
     cloud_type = _pick_cloud_type()
@@ -85,11 +85,23 @@ async def run_stop_runpod() -> None:
         ui.error(f"Failed to stop pod {pod_id}.\nStop manually at runpod.io/console")
 
 
-def _pick_model() -> dict | None:
-    table = Table(title="Available Models")
+def _pick_size() -> str:
+    table = Table(title="Model Size")
+    for col in ("#", "Size", "Description"):
+        table.add_column(col)
+    for i, (key, desc) in enumerate(_SIZE_OPTIONS, 1):
+        table.add_row(str(i), key, desc)
+    ui.console.print(table)
+    idx = IntPrompt.ask("Pick a size filter", default=1) - 1
+    return _SIZE_OPTIONS[idx][0]
+
+
+def _pick_model(size_filter: str = "ALL") -> dict | None:
+    pool = MODELS if size_filter == "ALL" else [m for m in MODELS if m["size"] == size_filter]
+    table = Table(title="Available Models" + (f" ({size_filter})" if size_filter != "ALL" else ""))
     for col in ("#", "Model", "Category", "VRAM", "Description"):
         table.add_column(col)
-    ordered = sorted(MODELS, key=lambda m: (0 if m["category"] == "Coding" else 1, m["label"]))
+    ordered = sorted(pool, key=lambda m: (0 if m["category"] == "Coding" else 1, m["label"]))
     for i, m in enumerate(ordered, 1):
         table.add_row(str(i), m["label"], m["category"], f"{m['vram_gb']} GB", m["description"])
     table.add_row(str(len(ordered) + 1), CUSTOM_MODEL_OPTION, "", "", "")

@@ -6,6 +6,7 @@ class ModelEntry(TypedDict):
     label: str
     category: str
     vram_gb: int
+    size: str  # "small" | "medium" | "large"
     description: str
 
 
@@ -15,6 +16,7 @@ MODELS: list[ModelEntry] = [
         "label": "Qwen2.5-Coder-32B",
         "category": "Coding",
         "vram_gb": 40,
+        "size": "large",
         "description": "Best coding model, recommended",
     },
     {
@@ -22,6 +24,7 @@ MODELS: list[ModelEntry] = [
         "label": "Qwen2.5-Coder-7B",
         "category": "Coding",
         "vram_gb": 16,
+        "size": "small",
         "description": "Fast and cheap coding model",
     },
     {
@@ -29,6 +32,7 @@ MODELS: list[ModelEntry] = [
         "label": "DeepSeek-Coder-V2-Lite",
         "category": "Coding",
         "vram_gb": 24,
+        "size": "medium",
         "description": "Strong coding alternative",
     },
     {
@@ -36,6 +40,7 @@ MODELS: list[ModelEntry] = [
         "label": "Llama-3.1-70B",
         "category": "General",
         "vram_gb": 80,
+        "size": "large",
         "description": "Powerful general purpose",
     },
     {
@@ -43,6 +48,7 @@ MODELS: list[ModelEntry] = [
         "label": "Llama-3.1-8B",
         "category": "General",
         "vram_gb": 16,
+        "size": "small",
         "description": "Fast general purpose",
     },
     {
@@ -50,8 +56,16 @@ MODELS: list[ModelEntry] = [
         "label": "Mistral-7B",
         "category": "General",
         "vram_gb": 16,
+        "size": "small",
         "description": "Lightweight, fast",
     },
 ]
 
 CUSTOM_MODEL_OPTION = "Custom (type manually)"
+
+_SIZE_OPTIONS = [
+    ("ALL",    "Show all models"),
+    ("small",  "Small  (≤16 GB VRAM) — cheapest GPUs"),
+    ("medium", "Medium (17–32 GB VRAM)"),
+    ("large",  "Large  (>32 GB VRAM) — highest quality"),
+]
