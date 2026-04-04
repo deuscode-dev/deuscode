@@ -165,9 +165,26 @@ def _parse_xml_tools(text: str) -> list[tuple[str, dict]]:
     for m in _XML_TOOL_RE.finditer(text):
         name = m.group(1)
         body = m.group(2)
-        args = {t.group(1): t.group(2).strip() for t in _XML_TAG_RE.finditer(body)}
+        raw = {t.group(1): t.group(2).strip() for t in _XML_TAG_RE.finditer(body)}
+        args = _normalize_args(name, raw, body)
         calls.append((name, args))
     return calls
+
+
+def _normalize_args(name: str, raw: dict, body: str) -> dict:
+    """Map whatever tags the model used to the expected argument names."""
+    if name == "write_file":
+        path = raw.get("path", "")
+        # accept 'content' or any other non-path tag as the file content
+        content = raw.get("content") or next(
+            (v for k, v in raw.items() if k != "path"), ""
+        )
+        return {"path": path, "content": content}
+    if name == "read_file":
+        return {"path": raw.get("path", "")}
+    if name == "bash":
+        return {"command": raw.get("command", raw.get("cmd", ""))}
+    return raw
 
 
 # ── code-block save fallback ──────────────────────────────────────────────────
