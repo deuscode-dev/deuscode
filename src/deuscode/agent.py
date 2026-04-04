@@ -142,31 +142,42 @@ async def _loop(client: httpx.AsyncClient, messages: list, model: str, config: C
         if use_tools:
             tool_calls = msg.get("tool_calls") or []
             if not tool_calls:
-                return content or "(empty response)"
+                return _clean_response(content) or "(empty response)"
             for tc in tool_calls:
                 result = await _execute_tool(tc)
                 messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
         else:
             xml_calls = _parse_xml_tools(content)
             if not xml_calls:
-                # last resort: offer to save any code blocks in the response
                 await _offer_code_blocks(content)
-                return content or "(model produced no output — try a larger model)"
+                return _clean_response(content) or "(model produced no output — try a larger model)"
             for name, args in xml_calls:
                 ui.tool_call(name, args)
                 result = await tools.dispatch(name, json.dumps(args))
                 if name != "read_file":
                     ui.tool_result(result[:500])
                 messages.append({"role": "user", "content": f"<tool_result>{result}</tool_result>"})
+            # Ask the model for a clean summary after tool execution
+            messages.append({"role": "user", "content": "Summarize what you just did in one or two sentences, no XML tags."})
 
 
 # ── thinking-tag stripping ────────────────────────────────────────────────────
 
 _THINK_RE = _re.compile(r"<think>.*?</think>", _re.DOTALL)
+_TOOL_RESULT_RE = _re.compile(r"<tool_result>.*?</tool_result>", _re.DOTALL)
+_TOOL_CALL_RE = _re.compile(r"<tool_call>.*?</tool_call>", _re.DOTALL)
+_XML_TAG_STRIP_RE = _re.compile(r"<[^>]+>")
 
 
 def _strip_thinking(text: str) -> str:
     return _THINK_RE.sub("", text).strip()
+
+
+def _clean_response(text: str) -> str:
+    text = _TOOL_RESULT_RE.sub("", text)
+    text = _TOOL_CALL_RE.sub("", text)
+    text = _XML_TAG_STRIP_RE.sub("", text)
+    return text.strip()
 
 
 # ── XML tool protocol ─────────────────────────────────────────────────────────
