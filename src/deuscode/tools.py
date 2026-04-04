@@ -51,15 +51,21 @@ async def read_file(path: str) -> str:
     target = Path(path).expanduser().resolve()
     if not target.exists():
         return f"Error: '{path}' does not exist."
-    return target.read_text(encoding="utf-8", errors="replace")
+    content = target.read_text(encoding="utf-8", errors="replace")
+    ui.print_file_content(path, content)
+    return content
 
 
 async def write_file(path: str, content: str) -> str:
     target = Path(path).expanduser().resolve()
     if target.exists():
         existing = target.read_text(encoding="utf-8", errors="replace")
-        _show_diff(existing, content, path)
-    if not ui.confirm(f"Write to [bold]{path}[/bold]?"):
+        ui.print_diff(existing, content, path)
+        confirmed = ui.confirm(f"[yellow]Write changes to {path}?[/yellow]")
+    else:
+        ui.print_panel(f"New file: {path} ({len(content.splitlines())} lines)")
+        confirmed = ui.confirm(f"[yellow]Create {path}?[/yellow]")
+    if not confirmed:
         return "Cancelled by user."
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
@@ -73,18 +79,6 @@ async def bash(command: str) -> str:
     result = subprocess.run(command, shell=True, capture_output=True, text=True)
     output = result.stdout + result.stderr
     return output.strip() or "(no output)"
-
-
-def _show_diff(old: str, new: str, path: str) -> None:
-    old_lines = old.splitlines()
-    new_lines = new.splitlines()
-    ui.console.print(f"[dim]Diff for {path}:[/dim]")
-    for line in old_lines:
-        if line not in new_lines:
-            ui.console.print(f"[red]- {line}[/red]")
-    for line in new_lines:
-        if line not in old_lines:
-            ui.console.print(f"[green]+ {line}[/green]")
 
 
 TOOL_FUNCTIONS = {

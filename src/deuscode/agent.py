@@ -10,6 +10,8 @@ from deuscode.config import Config, CONFIG_PATH
 from deuscode.repomap import generate_repo_map
 from deuscode import tools, ui, runpod
 
+_xml_fallback_warned = False
+
 _SYSTEM_BASE = """\
 You are Deus, an AI coding assistant running in a terminal.
 
@@ -69,17 +71,24 @@ async def chat_loop(
     model = model_override or config.model
     system_prompt = _build_system_prompt(path, no_map)
     messages: list = [{"role": "system", "content": system_prompt}]
+
+    dir_name = Path(path).resolve().name
+    if not no_map:
+        file_count = system_prompt.count("\n")
+        ui.print_dim(f"📁 Mapped {file_count} files in {dir_name}")
     ui.console.print(f"[bold green]Deus[/bold green] [dim]{model}[/dim]  (Ctrl+C or empty line to exit)\n")
+
+    prompt_label = f"[bold cyan][{dir_name}] you[/bold cyan]"
     async with httpx.AsyncClient(timeout=120.0) as client:
         pending = initial_prompt
         while True:
             if pending is not None:
                 user_input = pending
                 pending = None
-                ui.console.print(f"[bold cyan]you[/bold cyan]: {user_input}")
+                ui.console.print(f"{prompt_label}: {user_input}")
             else:
                 try:
-                    user_input = Prompt.ask("[bold cyan]you[/bold cyan]")
+                    user_input = Prompt.ask(prompt_label)
                 except (EOFError, KeyboardInterrupt):
                     ui.console.print("\n[dim]Goodbye.[/dim]")
                     break
@@ -146,7 +155,8 @@ async def _loop(client: httpx.AsyncClient, messages: list, model: str, config: C
             for name, args in xml_calls:
                 ui.tool_call(name, args)
                 result = await tools.dispatch(name, json.dumps(args))
-                ui.tool_result(result[:500])
+                if name != "read_file":
+                    ui.tool_result(result[:500])
                 messages.append({"role": "user", "content": f"<tool_result>{result}</tool_result>"})
 
 
@@ -266,7 +276,10 @@ async def _chat(
         await asyncio.sleep(delay)
 
     if response.status_code == 400 and use_tools and "tool" in response.text.lower():
-        ui.console.print("[dim]Function calling unavailable — using XML tool protocol[/dim]")
+        global _xml_fallback_warned
+        if not _xml_fallback_warned:
+            ui.warning("Function calling unavailable — using XML tool protocol")
+            _xml_fallback_warned = True
         _inject_xml_system(messages)
         return await _chat(client, messages, model, config, use_tools=False)
 
@@ -292,9 +305,12 @@ def _inject_xml_system(messages: list) -> None:
 
 async def _execute_tool(tc: dict) -> str:
     fn = tc["function"]
-    ui.tool_call(fn["name"], json.loads(fn.get("arguments", "{}")))
-    result = await tools.dispatch(fn["name"], fn.get("arguments", "{}"))
-    ui.tool_result(result[:500])
+    name = fn["name"]
+    ui.tool_call(name, json.loads(fn.get("arguments", "{}")))
+    result = await tools.dispatch(name, fn.get("arguments", "{}"))
+    # read_file already rendered the content via print_file_content — skip duplicate
+    if name != "read_file":
+        ui.tool_result(result[:500])
     return result
 
 
