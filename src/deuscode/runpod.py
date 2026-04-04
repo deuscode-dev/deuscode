@@ -4,7 +4,7 @@ import httpx
 
 _API_URL = "https://api.runpod.io/graphql"
 _POLL_INTERVAL = 10
-_TIMEOUT_SECONDS = 300
+_TIMEOUT_SECONDS = 600
 
 
 def _headers(api_key: str) -> dict:
@@ -123,7 +123,7 @@ async def wait_for_ready(api_key: str, pod_id: str, on_poll=None) -> str:
     raise TimeoutError(f"Pod {pod_id} did not become ready within {_TIMEOUT_SECONDS}s")
 
 
-async def wait_for_health(endpoint: str, on_poll=None, timeout: int = 300) -> None:
+async def wait_for_health(endpoint: str, on_poll=None, timeout: int = 600) -> None:
     """Poll GET /health until vLLM responds 200."""
     url = f"{endpoint.rstrip('/')}/health"
     elapsed = 0
