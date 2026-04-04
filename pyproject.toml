@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "deuscode"
+version = "0.1.0"
+description = "AI-powered multi-agent CLI coding assistant for local LLMs"
+readme = "README.md"
+license = { text = "AGPL-3.0-or-later" }
+requires-python = ">=3.12"
+dependencies = [
+    "typer",
+    "rich",
+]
+
+[project.scripts]
+deus = "deuscode.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/deuscode"]
