@@ -112,21 +112,34 @@ async def _loop(client: httpx.AsyncClient, messages: list, model: str, config: C
 
 import re as _re
 
-_CODE_BLOCK_RE = _re.compile(r"```(?:\w+)?\n(.*?)```", _re.DOTALL)
+_CODE_BLOCK_RE = _re.compile(r"```(\w*)\n(.*?)```", _re.DOTALL)
+_FILENAME_RE = _re.compile(r"\b([\w.-]+\.(?:html?|css|js|ts|py|sh|json|yaml|yml|xml|txt|md|rs|go|java|c|cpp|h))\b")
+_LANG_EXT = {"html": "html", "css": "css", "javascript": "js", "js": "js",
+             "typescript": "ts", "python": "py", "bash": "sh", "sh": "sh",
+             "json": "json", "yaml": "yaml", "yml": "yaml", "xml": "xml"}
+
+
+def _suggest_filename(text: str, lang: str) -> str:
+    # prefer an explicit filename mentioned in the text
+    match = _FILENAME_RE.search(text)
+    if match:
+        return match.group(1)
+    ext = _LANG_EXT.get(lang.lower(), lang.lower() or "txt")
+    return f"output.{ext}"
 
 
 async def _offer_code_blocks(text: str) -> None:
     """If the model printed code instead of calling write_file, offer to save it."""
     from rich.prompt import Prompt
     from pathlib import Path
-    blocks = _CODE_BLOCK_RE.findall(text)
+    blocks = _CODE_BLOCK_RE.findall(text)  # list of (lang, code)
     if not blocks:
         return
-    for i, code in enumerate(blocks, 1):
-        label = f"code block {i}" if len(blocks) > 1 else "this code block"
-        ui.console.print(f"[dim]Save {label} to a file? Enter path or leave empty to skip.[/dim]")
+    for i, (lang, code) in enumerate(blocks, 1):
+        suggestion = _suggest_filename(text, lang)
+        label = f"code block {i}" if len(blocks) > 1 else "code"
         try:
-            path = Prompt.ask("[bold cyan]save to[/bold cyan]", default="")
+            path = Prompt.ask(f"[bold cyan]save {label} to[/bold cyan]", default=suggestion)
         except (EOFError, KeyboardInterrupt):
             return
         if not path.strip():
