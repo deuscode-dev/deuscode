@@ -1,5 +1,7 @@
 import asyncio
 import json
+import re as _re
+from pathlib import Path
 
 import httpx
 import yaml
@@ -18,6 +20,31 @@ RULES — follow strictly:
 - Do NOT describe what you would do — just do it by calling the tool.
 - After calling a tool, briefly explain what you did and ask if anything else is needed.
 - If you cannot complete a task without tools, say so clearly.\
+"""
+
+_XML_TOOL_ADDON = """
+
+## Tool Protocol (use these XML tags since function-calling is unavailable)
+
+To write or create a file:
+<write_file>
+<path>filename.txt</path>
+<content>
+file content here
+</content>
+</write_file>
+
+To read a file:
+<read_file>
+<path>filename.txt</path>
+</read_file>
+
+To run a shell command:
+<bash>
+<command>ls -la</command>
+</bash>
+
+IMPORTANT: Use these XML tags to actually perform file operations. Do NOT just describe the action or print code blocks.\
 """
 
 
@@ -89,60 +116,84 @@ def _build_system_prompt(path: str, no_map: bool) -> str:
 
 
 async def _loop(client: httpx.AsyncClient, messages: list, model: str, config: Config) -> str:
+    use_tools = True
     while True:
-        data = await _chat(client, messages, model, config)
-        choice = data["choices"][0]
-        msg = choice["message"]
+        data, use_tools = await _chat(client, messages, model, config, use_tools)
+        msg = data["choices"][0]["message"]
+        content = _strip_thinking(msg.get("content") or "")
         messages.append(msg)
 
-        tool_calls = msg.get("tool_calls") or []
-        if not tool_calls:
-            content = _strip_thinking(msg.get("content") or "")
-            if not content.strip():
-                content = "[dim](no response — model may be too small or thinking output was empty)[/dim]"
-            await _offer_code_blocks(content)
-            return content
+        if use_tools:
+            tool_calls = msg.get("tool_calls") or []
+            if not tool_calls:
+                return content or "(empty response)"
+            for tc in tool_calls:
+                result = await _execute_tool(tc)
+                messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
+        else:
+            xml_calls = _parse_xml_tools(content)
+            if not xml_calls:
+                # last resort: offer to save any code blocks in the response
+                await _offer_code_blocks(content)
+                return content or "(model produced no output — try a larger model)"
+            for name, args in xml_calls:
+                ui.tool_call(name, args)
+                result = await tools.dispatch(name, json.dumps(args))
+                ui.tool_result(result[:500])
+                messages.append({"role": "user", "content": f"<tool_result>{result}</tool_result>"})
 
-        for tc in tool_calls:
-            result = await _execute_tool(tc)
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc["id"],
-                "content": result,
-            })
 
-
-import re as _re
+# ── thinking-tag stripping ────────────────────────────────────────────────────
 
 _THINK_RE = _re.compile(r"<think>.*?</think>", _re.DOTALL)
 
 
 def _strip_thinking(text: str) -> str:
-    """Remove <think>...</think> blocks emitted by Qwen3 and similar models."""
     return _THINK_RE.sub("", text).strip()
 
 
+# ── XML tool protocol ─────────────────────────────────────────────────────────
+
+_XML_TOOL_RE = _re.compile(
+    r"<(write_file|read_file|bash)>(.*?)</\1>", _re.DOTALL
+)
+_XML_TAG_RE = _re.compile(r"<(\w+)>(.*?)</\1>", _re.DOTALL)
+
+
+def _parse_xml_tools(text: str) -> list[tuple[str, dict]]:
+    calls = []
+    for m in _XML_TOOL_RE.finditer(text):
+        name = m.group(1)
+        body = m.group(2)
+        args = {t.group(1): t.group(2).strip() for t in _XML_TAG_RE.finditer(body)}
+        calls.append((name, args))
+    return calls
+
+
+# ── code-block save fallback ──────────────────────────────────────────────────
+
 _CODE_BLOCK_RE = _re.compile(r"```(\w*)\n(.*?)```", _re.DOTALL)
-_FILENAME_RE = _re.compile(r"\b([\w.-]+\.(?:html?|css|js|ts|py|sh|json|yaml|yml|xml|txt|md|rs|go|java|c|cpp|h))\b")
-_LANG_EXT = {"html": "html", "css": "css", "javascript": "js", "js": "js",
-             "typescript": "ts", "python": "py", "bash": "sh", "sh": "sh",
-             "json": "json", "yaml": "yaml", "yml": "yaml", "xml": "xml"}
+_FILENAME_RE = _re.compile(
+    r"\b([\w.-]+\.(?:html?|css|js|ts|py|sh|json|yaml|yml|xml|txt|md|rs|go|java|c|cpp|h))\b"
+)
+_LANG_EXT = {
+    "html": "html", "css": "css", "javascript": "js", "js": "js",
+    "typescript": "ts", "python": "py", "bash": "sh", "sh": "sh",
+    "json": "json", "yaml": "yaml", "yml": "yaml", "xml": "xml",
+}
 
 
 def _suggest_filename(text: str, lang: str) -> str:
-    # prefer an explicit filename mentioned in the text
-    match = _FILENAME_RE.search(text)
-    if match:
-        return match.group(1)
+    m = _FILENAME_RE.search(text)
+    if m:
+        return m.group(1)
     ext = _LANG_EXT.get(lang.lower(), lang.lower() or "txt")
     return f"output.{ext}"
 
 
 async def _offer_code_blocks(text: str) -> None:
-    """If the model printed code instead of calling write_file, offer to save it."""
     from rich.prompt import Prompt
-    from pathlib import Path
-    blocks = _CODE_BLOCK_RE.findall(text)  # list of (lang, code)
+    blocks = _CODE_BLOCK_RE.findall(text)
     if not blocks:
         return
     for i, (lang, code) in enumerate(blocks, 1):
@@ -160,25 +211,23 @@ async def _offer_code_blocks(text: str) -> None:
         ui.console.print(f"[green]✓ Saved {target}[/green]")
 
 
+# ── HTTP chat ─────────────────────────────────────────────────────────────────
+
 _RETRY_STATUSES = {502, 503, 504}
 _RETRY_DELAYS = [5, 10, 20, 30, 60]
 
 
-async def _chat(client: httpx.AsyncClient, messages: list, model: str, config: Config) -> dict:
-    url = f"{config.base_url.rstrip('/')}/chat/completions"
-    headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
-    return await _post_with_retry(client, url, headers, messages, model, config, use_tools=True)
-
-
-async def _post_with_retry(
+async def _chat(
     client: httpx.AsyncClient,
-    url: str,
-    headers: dict,
     messages: list,
     model: str,
     config: Config,
-    use_tools: bool,
-) -> dict:
+    use_tools: bool = True,
+) -> tuple[dict, bool]:
+    """Returns (response_data, tools_were_used)."""
+    url = f"{config.base_url.rstrip('/')}/chat/completions"
+    headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
+
     payload: dict = {"model": model, "messages": messages, "max_tokens": config.max_tokens}
     if use_tools:
         payload["tools"] = tools.TOOL_SCHEMAS
@@ -192,11 +241,10 @@ async def _post_with_retry(
         ui.console.print(f"[dim]Server not ready ({response.status_code}), retrying in {delay}s...[/dim]")
         await asyncio.sleep(delay)
 
-    if response.status_code == 400 and use_tools:
-        body = response.text
-        if "tool" in body.lower():
-            ui.console.print("[dim]Tools not supported by this vLLM instance, retrying without tools...[/dim]")
-            return await _post_with_retry(client, url, headers, messages, model, config, use_tools=False)
+    if response.status_code == 400 and use_tools and "tool" in response.text.lower():
+        ui.console.print("[dim]Function calling unavailable — switching to XML tool protocol...[/dim]")
+        _inject_xml_system(messages)
+        return await _chat(client, messages, model, config, use_tools=False)
 
     if not response.is_success:
         body = response.text[:300].strip()
@@ -204,7 +252,18 @@ async def _post_with_retry(
         if response.status_code == 404:
             hint = "\n\nHint: vLLM started without a model. Stop this pod and run: deus setup --runpod"
         raise RuntimeError(f"HTTP {response.status_code} from {url}\n{body}{hint}")
-    return response.json()
+
+    return response.json(), use_tools
+
+
+def _inject_xml_system(messages: list) -> None:
+    """Append XML tool instructions to the existing system message (once)."""
+    if messages and messages[0]["role"] == "system":
+        if "<write_file>" not in messages[0]["content"]:
+            messages[0] = {
+                "role": "system",
+                "content": messages[0]["content"] + _XML_TOOL_ADDON,
+            }
 
 
 async def _execute_tool(tc: dict) -> str:
