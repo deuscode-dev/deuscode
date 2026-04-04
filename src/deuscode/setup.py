@@ -19,7 +19,11 @@ _CLOUD_TYPES = [
 
 
 async def run_setup_runpod() -> None:
-    api_key = Prompt.ask("[bold]RunPod API key[/bold]", password=True)
+    api_key = _load_saved_api_key()
+    if api_key:
+        ui.console.print(f"[dim]Using saved RunPod API key (••••{api_key[-4:]})[/dim]")
+    else:
+        api_key = Prompt.ask("[bold]RunPod API key[/bold]", password=True)
     model_entry = _pick_model()
     model_id = model_entry["id"] if model_entry else Prompt.ask("Enter model ID")
     vram_needed = model_entry["vram_gb"] if model_entry else 0
@@ -92,6 +96,12 @@ def _pick_model() -> dict | None:
     ui.console.print(table)
     idx = int(Prompt.ask("Pick a model", default="1")) - 1
     return ordered[idx] if idx < len(ordered) else None
+
+
+def _load_saved_api_key() -> str:
+    if not CONFIG_PATH.exists():
+        return ""
+    return (yaml.safe_load(CONFIG_PATH.read_text()) or {}).get("runpod_api_key", "")
 
 
 def _pick_cloud_type() -> str:
