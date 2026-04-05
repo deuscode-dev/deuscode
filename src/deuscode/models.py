@@ -6,7 +6,19 @@ class ModelEntry(TypedDict):
     label: str
     category: str
     vram_gb: int
+    param_count_b: int
     description: str
+    tier_label: str
+
+
+def _tier_label(params: int) -> str:
+    if params >= 70:
+        return "★ Best for complex tasks"
+    if params >= 32:
+        return "★ Recommended — full power"
+    if params >= 14:
+        return "✓ Good for most tasks"
+    return "⚡ Basic tasks only"
 
 
 MODELS: list[ModelEntry] = [
@@ -16,6 +28,7 @@ MODELS: list[ModelEntry] = [
         "label": "Qwen2.5-Coder-1.5B",
         "category": "Coding",
         "vram_gb": 4,
+        "param_count_b": 1,
         "description": "Tiny, runs on any GPU",
     },
     {
@@ -23,6 +36,7 @@ MODELS: list[ModelEntry] = [
         "label": "Qwen2.5-Coder-3B",
         "category": "Coding",
         "vram_gb": 8,
+        "param_count_b": 3,
         "description": "Small but capable coder",
     },
     {
@@ -30,6 +44,7 @@ MODELS: list[ModelEntry] = [
         "label": "Qwen2.5-Coder-7B",
         "category": "Coding",
         "vram_gb": 16,
+        "param_count_b": 7,
         "description": "Fast and cheap coding model",
     },
     {
@@ -37,6 +52,7 @@ MODELS: list[ModelEntry] = [
         "label": "DeepSeek-Coder-V2-Lite",
         "category": "Coding",
         "vram_gb": 32,
+        "param_count_b": 16,
         "description": "MoE coder, strong for its size",
     },
     {
@@ -44,6 +60,7 @@ MODELS: list[ModelEntry] = [
         "label": "Qwen2.5-Coder-14B",
         "category": "Coding",
         "vram_gb": 28,
+        "param_count_b": 14,
         "description": "Best mid-size coding model",
     },
     {
@@ -51,6 +68,7 @@ MODELS: list[ModelEntry] = [
         "label": "Qwen2.5-Coder-32B",
         "category": "Coding",
         "vram_gb": 64,
+        "param_count_b": 32,
         "description": "Top coding quality, needs A100",
     },
     # ── General ─────────────────────────────────────────────────────────────
@@ -59,6 +77,7 @@ MODELS: list[ModelEntry] = [
         "label": "Llama-3.2-1B",
         "category": "General",
         "vram_gb": 3,
+        "param_count_b": 1,
         "description": "Ultra-small, very fast",
     },
     {
@@ -66,6 +85,7 @@ MODELS: list[ModelEntry] = [
         "label": "Llama-3.2-3B",
         "category": "General",
         "vram_gb": 8,
+        "param_count_b": 3,
         "description": "Small general purpose",
     },
     {
@@ -73,6 +93,7 @@ MODELS: list[ModelEntry] = [
         "label": "Llama-3.1-8B",
         "category": "General",
         "vram_gb": 16,
+        "param_count_b": 8,
         "description": "Fast general purpose",
     },
     {
@@ -80,6 +101,7 @@ MODELS: list[ModelEntry] = [
         "label": "Mistral-7B",
         "category": "General",
         "vram_gb": 14,
+        "param_count_b": 7,
         "description": "Lightweight, fast",
     },
     {
@@ -87,6 +109,7 @@ MODELS: list[ModelEntry] = [
         "label": "Mistral-Nemo-12B",
         "category": "General",
         "vram_gb": 24,
+        "param_count_b": 12,
         "description": "Strong 12B from Mistral+NVIDIA",
     },
     {
@@ -94,6 +117,7 @@ MODELS: list[ModelEntry] = [
         "label": "Gemma-2-9B",
         "category": "General",
         "vram_gb": 18,
+        "param_count_b": 9,
         "description": "Google's efficient 9B model",
     },
     {
@@ -101,6 +125,7 @@ MODELS: list[ModelEntry] = [
         "label": "Gemma-2-27B",
         "category": "General",
         "vram_gb": 54,
+        "param_count_b": 27,
         "description": "Google's high-quality 27B model",
     },
     {
@@ -108,18 +133,23 @@ MODELS: list[ModelEntry] = [
         "label": "Llama-3.1-70B",
         "category": "General",
         "vram_gb": 140,
+        "param_count_b": 70,
         "description": "Powerful, needs multi-GPU",
     },
 ]
+
+# Compute tier labels from param count
+for _m in MODELS:
+    _m["tier_label"] = _tier_label(_m["param_count_b"])
 
 CUSTOM_MODEL_OPTION = "Custom (type manually)"
 
 # vLLM --tool-call-parser value per model family
 _TOOL_CALL_PARSERS: dict[str, str] = {
-    "qwen":      "hermes",
-    "deepseek":  "hermes",
-    "llama":     "llama3_json",
-    "mistral":   "mistral",
+    "qwen": "hermes",
+    "deepseek": "hermes",
+    "llama": "llama3_json",
+    "mistral": "mistral",
 }
 
 
@@ -130,11 +160,12 @@ def tool_call_parser(model_id: str) -> str | None:
             return parser
     return None
 
+
 _SIZE_OPTIONS = [
-    ("ALL",    "Show all models"),
-    ("small",  "Small  (≤16 GB VRAM) — cheapest GPUs"),
+    ("ALL", "Show all models"),
+    ("small", "Small  (≤16 GB VRAM) — cheapest GPUs"),
     ("medium", "Medium (17–40 GB VRAM)"),
-    ("large",  "Large  (>40 GB VRAM) — highest quality"),
+    ("large", "Large  (>40 GB VRAM) — highest quality"),
 ]
 
 
@@ -151,9 +182,9 @@ def filter_by_size(models: list[ModelEntry], size: str) -> list[ModelEntry]:
 
 
 _SIZE_RANGES: dict[str, tuple[int, int]] = {
-    "small":  (0, 16),
+    "small": (0, 16),
     "medium": (17, 40),
-    "big":    (41, 999),
+    "big": (41, 999),
 }
 
 

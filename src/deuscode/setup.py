@@ -25,6 +25,12 @@ async def run_setup_runpod() -> None:
         ui.console.print(f"[dim]Using saved RunPod API key (••••{api_key[-4:]})[/dim]")
     else:
         api_key = Prompt.ask("[bold]RunPod API key[/bold]", password=True)
+
+    from deuscode.resource_selector import _pick_endpoint_type
+    if _pick_endpoint_type() == "serverless":
+        await _setup_serverless(api_key)
+        return
+
     model_entry = _pick_model(_pick_size())
     model_id = model_entry["id"] if model_entry else Prompt.ask("Enter model ID")
     vram_needed = model_entry["vram_gb"] if model_entry else 0
@@ -130,6 +136,32 @@ async def run_stop_runpod() -> None:
         ui.final_answer("✓ Pod stopped. No more charges.")
     else:
         ui.error(f"Failed to stop pod {pod_id}.\nStop manually at runpod.io/console")
+
+
+async def _setup_serverless(api_key: str) -> None:
+    """Create or reuse a RunPod Serverless endpoint."""
+    from deuscode.endpoints.serverless import ServerlessProvider
+    from deuscode.endpoints.base import EndpointStatus
+    from deuscode.config import save_endpoint
+    from deuscode.resource_selector import _pick_or_create, _create_new
+
+    provider = ServerlessProvider()
+    existing = await provider.list_endpoints(api_key)
+
+    if existing:
+        endpoint = await _pick_or_create(provider, api_key, existing)
+    else:
+        endpoint = await _create_new(provider, api_key, "serverless")
+
+    save_endpoint(endpoint, api_key)
+    if endpoint.status == EndpointStatus.COLD:
+        ui.warning("First query may take 30-60s (cold start).")
+    ui.final_answer(
+        f"✓ Serverless endpoint ready.\n"
+        f"  ID: {endpoint.endpoint_id}\n"
+        f"  Model: {endpoint.model_id.split('/')[-1]}\n\n"
+        f"Run: deus 'your prompt'"
+    )
 
 
 def _pick_size() -> str:

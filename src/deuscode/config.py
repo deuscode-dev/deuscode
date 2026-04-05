@@ -1,5 +1,5 @@
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 
 import yaml
 
@@ -13,6 +13,8 @@ _DEFAULTS = {
     "auto_stop_runpod": False,
     "search_backend": "duckduckgo",
     "brave_api_key": "",
+    "endpoint_type": "pod",
+    "endpoint_id": "",
 }
 
 
@@ -25,6 +27,8 @@ class Config:
     auto_stop_runpod: bool = False
     search_backend: str = "duckduckgo"
     brave_api_key: str = ""
+    endpoint_type: str = "pod"
+    endpoint_id: str = ""
 
 
 def load_config() -> Config:
@@ -43,7 +47,27 @@ def load_config() -> Config:
         auto_stop_runpod=bool(merged.get("auto_stop_runpod", False)),
         search_backend=merged.get("search_backend", "duckduckgo"),
         brave_api_key=merged.get("brave_api_key", ""),
+        endpoint_type=merged.get("endpoint_type", "pod"),
+        endpoint_id=merged.get("endpoint_id", ""),
     )
+
+
+def save_endpoint(info, api_key: str = "") -> None:
+    """Save endpoint info to config. Preserves existing fields."""
+    existing = {}
+    if CONFIG_PATH.exists():
+        existing = yaml.safe_load(CONFIG_PATH.read_text()) or {}
+    existing.update({
+        "endpoint_type": info.endpoint_type.value,
+        "endpoint_id": info.endpoint_id,
+        "base_url": info.base_url,
+        "model": info.model_id,
+    })
+    if api_key:
+        existing["api_key"] = api_key
+        existing["runpod_api_key"] = api_key
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(yaml.dump(existing, default_flow_style=False))
 
 
 def _create_default_config() -> None:

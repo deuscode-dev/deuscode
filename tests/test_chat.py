@@ -11,6 +11,11 @@ def test_parse_model_command_without_id():
     assert result == ("model", {"model_id": None})
 
 
+def test_parse_resource_command():
+    result = parse_special_command("--resource")
+    assert result == ("resource", {})
+
+
 def test_parse_non_special_command():
     result = parse_special_command("write me a function")
     assert result is None

@@ -73,6 +73,7 @@ async def run_agent(
     path: str = ".",
 ) -> str:
     """Run the agent with a pre-built plan and preloaded context."""
+    await _warn_if_cold(config)
     system = _build_agent_system(plan, preloaded_context, repo_map, path)
     messages = [
         {"role": "system", "content": system},
@@ -81,6 +82,20 @@ async def run_agent(
     ui.thinking(config.model)
     async with httpx.AsyncClient(timeout=120.0) as client:
         return await _loop(client, messages, config.model, config)
+
+
+async def _warn_if_cold(config: Config) -> None:
+    """Warn user if serverless endpoint is cold."""
+    if config.endpoint_type != "serverless" or not config.endpoint_id:
+        return
+    try:
+        from deuscode.endpoints import get_endpoint_provider, EndpointStatus
+        provider = get_endpoint_provider(config.endpoint_type)
+        status = await provider.get_status(config.api_key, config.endpoint_id)
+        if status == EndpointStatus.COLD:
+            ui.warning("Endpoint is cold — first response may take 30-60s.")
+    except Exception:
+        pass
 
 
 def _build_agent_system(plan: "ActionPlan", preloaded_context: dict, repo_map: str, path: str) -> str:

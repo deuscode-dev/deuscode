@@ -26,7 +26,11 @@
       "Bash(gh release:*)",
       "Bash(deus --help)",
       "Bash(deus setup:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Read(//data/data/com.termux/files/home/.claude/**)",
+      "Bash(rm /data/data/com.termux/files/home/devs/deuscode/.claude/commands/ship.md /data/data/com.termux/files/home/devs/deuscode/.claude/commands/review.md /data/data/com.termux/files/home/devs/deuscode/.claude/commands/test.md /data/data/com.termux/files/home/devs/deuscode/.claude/commands/critic.md)",
+      "Bash(rmdir /data/data/com.termux/files/home/devs/deuscode/.claude/commands/)",
+      "Bash(git:*)"
     ]
   }
 }
