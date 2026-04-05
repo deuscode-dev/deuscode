@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.gnu.org)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(git --version)",
+      "Bash(gh --version)",
+      "Bash(gh auth:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git rm:*)",
+      "Bash(gh repo:*)",
+      "Bash(gh org:*)",
+      "Bash(git remote:*)",
+      "Bash(git branch:*)",
+      "Bash(git push:*)",
+      "Bash(pip index:*)",
+      "Bash(pkg install:*)",
+      "Bash(pip show:*)",
+      "Bash(pip cache:*)",
+      "Bash(pytest:*)",
+      "Bash(git tag:*)",
+      "Bash(gh release:*)",
+      "Bash(deus --help)",
+      "Bash(deus setup:*)",
+      "Bash(python3:*)"
+    ]
+  }
+}

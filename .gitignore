@@ -1,8 +1,13 @@
+.deus/
 dist/
 build/
 *.egg-info/
 __pycache__/
-*.py[cod]
-.venv/
+*.pyc
+*.pyo
 .env
-.claude/
+.env.*
+debug_*.py
+.pytest_cache/
+.coverage
+htmlcov/
