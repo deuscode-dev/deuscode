@@ -11,6 +11,8 @@ _DEFAULTS = {
     "model": "your-model-name",
     "max_tokens": 8192,
     "auto_stop_runpod": False,
+    "search_backend": "duckduckgo",
+    "brave_api_key": "",
 }
 
 
@@ -21,6 +23,8 @@ class Config:
     model: str
     max_tokens: int
     auto_stop_runpod: bool = False
+    search_backend: str = "duckduckgo"
+    brave_api_key: str = ""
 
 
 def load_config() -> Config:
@@ -37,6 +41,8 @@ def load_config() -> Config:
         model=merged["model"],
         max_tokens=int(merged["max_tokens"]),
         auto_stop_runpod=bool(merged.get("auto_stop_runpod", False)),
+        search_backend=merged.get("search_backend", "duckduckgo"),
+        brave_api_key=merged.get("brave_api_key", ""),
     )
 
 

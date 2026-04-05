@@ -81,8 +81,39 @@ async def bash(command: str) -> str:
     return output.strip() or "(no output)"
 
 
-async def search_web(query: str) -> str:
-    return f"Web search not available (query: {query!r})"
+async def search_web(query: str, config: dict | None = None) -> str:
+    """
+    Search the web and return formatted results string.
+    Used by context_loader and available as agent tool.
+    Returns empty string on any failure — never raises.
+    """
+    from deuscode.search import get_search_backend
+    from deuscode.config import load_config
+
+    try:
+        cfg = config or vars(load_config())
+        backend = get_search_backend(cfg)
+        results = await backend.search(query, max_results=3)
+    except Exception:
+        return f"[No results found for: {query}]"
+
+    if not results:
+        return f"[No results found for: {query}]"
+
+    return _format_results(results)
+
+
+def _format_results(results: list) -> str:
+    """Format SearchResult list into agent-readable string."""
+    parts = []
+    for i, r in enumerate(results, 1):
+        content = r.full_content or r.snippet
+        parts.append(
+            f"[{i}] {r.title}\n"
+            f"URL: {r.url}\n"
+            f"{content[:1500]}"
+        )
+    return "\n\n---\n\n".join(parts)
 
 
 TOOL_FUNCTIONS = {

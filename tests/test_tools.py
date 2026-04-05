@@ -1,9 +1,10 @@
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from deuscode.tools import read_file, write_file
+from deuscode.search.base import SearchResult
+from deuscode.tools import read_file, write_file, search_web
 
 
 @pytest.mark.asyncio
@@ -36,3 +37,25 @@ async def test_write_file_cancelled(tmp_path):
         result = await write_file(str(target), "content")
     assert "Cancelled" in result
     assert not target.exists()
+
+
+@pytest.mark.asyncio
+async def test_search_web_returns_no_results_string():
+    mock_backend = AsyncMock()
+    mock_backend.search.return_value = []
+    with patch("deuscode.search.get_search_backend", return_value=mock_backend):
+        result = await search_web("test query", config={})
+    assert "[No results found" in result
+
+
+@pytest.mark.asyncio
+async def test_search_web_formats_results():
+    mock_backend = AsyncMock()
+    mock_backend.search.return_value = [
+        SearchResult(title="First Result", url="https://a.com", snippet="snippet a"),
+        SearchResult(title="Second Result", url="https://b.com", snippet="snippet b"),
+    ]
+    with patch("deuscode.search.get_search_backend", return_value=mock_backend):
+        result = await search_web("test query", config={})
+    assert "First Result" in result
+    assert "Second Result" in result
