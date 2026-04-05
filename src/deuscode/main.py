@@ -114,8 +114,18 @@ def model_download(size: Optional[str] = typer.Option(None, "--size",
     ui.console.print(t)
 
     raw = typer.prompt("Pick a model", default="1")
-    idx = int(raw) - 1
-    model_id = pool[idx]["id"] if idx < len(pool) else typer.prompt("Enter model ID")
+    try:
+        idx = int(raw) - 1
+    except ValueError:
+        ui.error(f"Invalid selection: {raw}")
+        return
+    if idx == len(pool):
+        model_id = typer.prompt("Enter model ID")
+    elif 0 <= idx < len(pool):
+        model_id = pool[idx]["id"]
+    else:
+        ui.error(f"Selection out of range: {raw}")
+        return
 
     if model_id in downloaded:
         if not Confirm.ask(f"{model_id} already downloaded. Set as active?", default=False):

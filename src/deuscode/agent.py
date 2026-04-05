@@ -127,9 +127,12 @@ def _build_system_prompt(path: str, no_map: bool) -> str:
     return f"{base}\n\n## Files in working directory\n{repo_map}"
 
 
+_MAX_TURNS = 25
+
+
 async def _loop(client: httpx.AsyncClient, messages: list, model: str, config: Config) -> str:
     use_tools = True  # starts True; flipped to False on first 400 and stays False
-    while True:
+    for _ in range(_MAX_TURNS):
         data, use_tools = await _chat(client, messages, model, config, use_tools)
         msg = data["choices"][0]["message"]
         content = _strip_thinking(msg.get("content") or "")
@@ -155,6 +158,8 @@ async def _loop(client: httpx.AsyncClient, messages: list, model: str, config: C
                 messages.append({"role": "user", "content": f"<tool_result>{result}</tool_result>"})
             # Ask the model for a clean summary after tool execution
             messages.append({"role": "user", "content": "Summarize what you just did in one or two sentences, no XML tags."})
+    ui.warning(f"Agent reached {_MAX_TURNS}-turn limit")
+    return _clean_response(content) or "(reached turn limit)"
 
 
 # ── thinking-tag stripping ────────────────────────────────────────────────────
