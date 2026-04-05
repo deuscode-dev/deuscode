@@ -56,6 +56,48 @@ IMPORTANT: Use these XML tags to actually perform actions. Never just describe w
 
 
 
+async def call_llm(system: str, messages: list, config: Config) -> str:
+    """Single-shot LLM call with no tool loop. Used by the planner."""
+    full = [{"role": "system", "content": system}] + messages
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        data, _ = await _chat(client, full, config.model, config, use_tools=False)
+    msg = data["choices"][0]["message"]
+    return _strip_thinking(msg.get("content") or "")
+
+
+async def run_agent(
+    plan: "ActionPlan",
+    preloaded_context: dict,
+    repo_map: str,
+    config: Config,
+    path: str = ".",
+) -> str:
+    """Run the agent with a pre-built plan and preloaded context."""
+    system = _build_agent_system(plan, preloaded_context, repo_map, path)
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": plan.agent_instructions},
+    ]
+    ui.thinking(config.model)
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        return await _loop(client, messages, config.model, config)
+
+
+def _build_agent_system(plan: "ActionPlan", preloaded_context: dict, repo_map: str, path: str) -> str:
+    from deuscode.context_loader import format_preloaded_context
+    cwd = str(Path(path).resolve())
+    parts = [_SYSTEM_BASE, f"\n\nWorking directory: {cwd}"]
+    if repo_map:
+        parts.append(f"\n\n## Files in working directory\n{repo_map}")
+    preloaded_str = format_preloaded_context(preloaded_context)
+    if preloaded_str:
+        parts.append(f"\n\n## Pre-loaded Context\n{preloaded_str}")
+    if plan.validation_steps:
+        steps = "\n".join(f"- {s}" for s in plan.validation_steps)
+        parts.append(f"\n\n## Validation Checklist\n{steps}")
+    return "".join(parts)
+
+
 async def run(
     prompt: str,
     config: Config,

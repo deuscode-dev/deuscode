@@ -1,10 +1,9 @@
 from pathlib import Path
 
-import httpx
 from rich.prompt import Prompt
 
 from deuscode import ui
-from deuscode.agent import _loop, _build_system_prompt, _maybe_auto_stop
+from deuscode.agent import _maybe_auto_stop
 from deuscode.model_manager import list_downloaded_models, set_active_model
 
 
@@ -38,6 +37,34 @@ async def handle_model_command(model_id: str | None, config) -> None:
     ui.warning("Note: vLLM needs restart to load new model")
 
 
+async def _process_prompt(user_input: str, path: str, no_map: bool, config) -> str:
+    """Full planning pipeline: detect → plan → preload → execute."""
+    from deuscode.complexity import detect_complexity, Complexity
+    from deuscode.action_plan import simple_plan
+    from deuscode.planner import create_action_plan
+    from deuscode.context_loader import preload_context
+    from deuscode.agent import run_agent
+    from deuscode.repomap import generate_repo_map
+
+    repo_map = "" if no_map else generate_repo_map(path)
+    complexity = detect_complexity(user_input)
+
+    if complexity == Complexity.SIMPLE:
+        plan = simple_plan(user_input)
+    else:
+        ui.print_planning()
+        plan = await create_action_plan(user_input, repo_map, config)
+        ui.print_action_plan(plan)
+
+    if plan.files_to_read or plan.search_queries:
+        ui.print_preloading(plan)
+        preloaded = await preload_context(plan)
+    else:
+        preloaded = {"files": {}, "searches": {}}
+
+    return await run_agent(plan, preloaded, repo_map, config, path)
+
+
 async def run_chat_loop(
     initial_prompt: str | None = None,
     path: str = ".",
@@ -51,43 +78,40 @@ async def run_chat_loop(
         ui.error(str(e))
         return
 
-    model = model_override or config.model
-    system_prompt = _build_system_prompt(path, no_map)
-    messages: list = [{"role": "system", "content": system_prompt}]
+    if model_override:
+        import dataclasses
+        config = dataclasses.replace(config, model=model_override)
 
     dir_name = Path(path).resolve().name
-    if not no_map:
-        ui.print_dim(f"📁 Mapped {system_prompt.count(chr(10))} files in {dir_name}")
-    ui.console.print(f"[bold green]Deus[/bold green] [dim]{model}[/dim]  (Ctrl+C or empty line to exit)")
+    ui.console.print(
+        f"[bold green]Deus[/bold green] [dim]{config.model}[/dim]  (Ctrl+C or empty line to exit)"
+    )
     ui.print_dim("Type --model to switch models mid-session\n")
 
     prompt_label = f"[bold cyan][{dir_name}] you[/bold cyan]"
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        pending = initial_prompt
-        while True:
-            if pending is not None:
-                user_input, pending = pending, None
-                ui.console.print(f"{prompt_label}: {user_input}")
-            else:
-                try:
-                    user_input = Prompt.ask(prompt_label)
-                except (EOFError, KeyboardInterrupt):
-                    ui.console.print("\n[dim]Goodbye.[/dim]")
-                    break
-                if not user_input.strip():
-                    ui.console.print("[dim]Goodbye.[/dim]")
-                    break
+    pending = initial_prompt
+    while True:
+        if pending is not None:
+            user_input, pending = pending, None
+            ui.console.print(f"{prompt_label}: {user_input}")
+        else:
+            try:
+                user_input = Prompt.ask(prompt_label)
+            except (EOFError, KeyboardInterrupt):
+                ui.console.print("\n[dim]Goodbye.[/dim]")
+                break
+            if not user_input.strip():
+                ui.console.print("[dim]Goodbye.[/dim]")
+                break
 
-            special = parse_special_command(user_input)
-            if special:
-                cmd, args = special
-                if cmd == "model":
-                    await handle_model_command(args["model_id"], config)
-                continue
+        special = parse_special_command(user_input)
+        if special:
+            cmd, args = special
+            if cmd == "model":
+                await handle_model_command(args["model_id"], config)
+            continue
 
-            messages.append({"role": "user", "content": user_input})
-            ui.thinking(model)
-            result = await _loop(client, messages, model, config)
-            ui.final_answer(result)
+        result = await _process_prompt(user_input, path, no_map, config)
+        ui.final_answer(result)
 
     await _maybe_auto_stop(config)

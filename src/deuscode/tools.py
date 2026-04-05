@@ -81,10 +81,15 @@ async def bash(command: str) -> str:
     return output.strip() or "(no output)"
 
 
+async def search_web(query: str) -> str:
+    return f"Web search not available (query: {query!r})"
+
+
 TOOL_FUNCTIONS = {
     "read_file": read_file,
     "write_file": write_file,
     "bash": bash,
+    "search_web": search_web,
 }
 
 

@@ -48,8 +48,35 @@ def print_diff(old: str, new: str, path: str) -> None:
     console.print(Panel(text, title=f"Changes to {path}", border_style="yellow"))
 
 
-def print_panel(text: str) -> None:
-    console.print(Panel(text, border_style="dim"))
+def print_panel(text: str, title: str = "", border_style: str = "dim") -> None:
+    kwargs = {"border_style": border_style}
+    if title:
+        kwargs["title"] = title
+    console.print(Panel(text, **kwargs))
+
+
+def print_planning() -> None:
+    console.print("[dim cyan]⟳ Planning...[/dim cyan]")
+
+
+def print_action_plan(plan) -> None:
+    lines = [f"[dim]{plan.reasoning}[/dim]"]
+    if plan.files_to_read:
+        lines.append("[bold]Read:[/bold] " + ", ".join(plan.files_to_read))
+    if plan.search_queries:
+        lines.append("[bold]Search:[/bold] " + ", ".join(plan.search_queries))
+    if plan.files_to_create:
+        lines.append("[bold]Create:[/bold] " + ", ".join(plan.files_to_create))
+    if plan.validation_steps:
+        checks = "  ".join(f"• {s}" for s in plan.validation_steps)
+        lines.append(f"[bold]Validate:[/bold] {checks}")
+    console.print(Panel("\n".join(lines), title="[bold cyan]Plan[/bold cyan]", border_style="cyan"))
+
+
+def print_preloading(plan) -> None:
+    items = plan.files_to_read + plan.search_queries
+    if items:
+        console.print(f"[dim]Preloading: {', '.join(items)}[/dim]")
 
 
 def print_dim(text: str) -> None:
