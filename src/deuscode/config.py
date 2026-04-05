@@ -15,6 +15,7 @@ _DEFAULTS = {
     "brave_api_key": "",
     "endpoint_type": "pod",
     "endpoint_id": "",
+    "hf_token": "",
 }
 
 
@@ -29,6 +30,7 @@ class Config:
     brave_api_key: str = ""
     endpoint_type: str = "pod"
     endpoint_id: str = ""
+    hf_token: str = ""
 
 
 def load_config() -> Config:
@@ -49,6 +51,7 @@ def load_config() -> Config:
         brave_api_key=merged.get("brave_api_key", ""),
         endpoint_type=merged.get("endpoint_type", "pod"),
         endpoint_id=merged.get("endpoint_id", ""),
+        hf_token=merged.get("hf_token", ""),
     )
 
 

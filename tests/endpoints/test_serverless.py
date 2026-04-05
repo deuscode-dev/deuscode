@@ -6,6 +6,8 @@ from deuscode.endpoints.base import EndpointStatus, EndpointType
 from deuscode.endpoints.serverless import (
     ServerlessProvider,
     SERVERLESS_URL,
+    _build_create_input,
+    _get_tool_call_parser,
     _parse_endpoint,
 )
 
@@ -87,3 +89,41 @@ async def test_get_status_error_on_exception(monkeypatch):
     )
     provider = ServerlessProvider()
     assert await provider.get_status("k", "ep") == EndpointStatus.ERROR
+
+
+def test_tool_call_parser_qwen():
+    assert _get_tool_call_parser("Qwen/Qwen2.5-Coder-32B") == "hermes"
+
+
+def test_tool_call_parser_llama():
+    assert _get_tool_call_parser("meta-llama/Llama-3.1-70B") == "llama3_json"
+
+
+def test_tool_call_parser_default():
+    assert _get_tool_call_parser("unknown/model") == "hermes"
+
+
+def test_build_create_input_has_tool_choice():
+    result = _build_create_input("Qwen/Qwen2.5-Coder-7B", "AMPERE_80")
+    env = {e["key"]: e["value"] for e in result["env"]}
+    assert env["ENABLE_AUTO_TOOL_CHOICE"] == "true"
+    assert "TOOL_CALL_PARSER" in env
+
+
+def test_build_create_input_with_quantization():
+    result = _build_create_input("some/model", "ADA_80", quantization="awq")
+    env = {e["key"]: e["value"] for e in result["env"]}
+    assert env["QUANTIZATION"] == "awq"
+
+
+def test_build_create_input_with_hf_token():
+    result = _build_create_input("meta-llama/Llama-3.1-8B", "ADA_80", hf_token="hf_abc")
+    env = {e["key"]: e["value"] for e in result["env"]}
+    assert env["HF_TOKEN"] == "hf_abc"
+
+
+def test_build_create_input_no_quantization_by_default():
+    result = _build_create_input("some/model", "ADA_80")
+    keys = [e["key"] for e in result["env"]]
+    assert "QUANTIZATION" not in keys
+    assert "HF_TOKEN" not in keys

@@ -286,6 +286,7 @@ async def _chat(
     use_tools: bool = True,
 ) -> tuple[dict, bool]:
     """Returns (response_data, tools_were_used)."""
+    # Serverless: base_url = https://api.runpod.ai/v2/{endpoint_id}/openai/v1
     url = f"{config.base_url.rstrip('/')}/chat/completions"
     headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
 

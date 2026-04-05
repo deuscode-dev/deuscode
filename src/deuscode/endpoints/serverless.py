@@ -5,6 +5,14 @@ from deuscode.endpoints.base import EndpointInfo, EndpointStatus, EndpointType
 RUNPOD_API_BASE = "https://api.runpod.io/graphql"
 SERVERLESS_URL = "https://api.runpod.ai/v2/{endpoint_id}/openai/v1"
 
+TOOL_CALL_PARSERS = {
+    "qwen": "hermes",
+    "llama": "llama3_json",
+    "mistral": "mistral",
+    "deepseek": "hermes",
+    "default": "hermes",
+}
+
 _LIST_QUERY = """
 {
   myself {
@@ -21,6 +29,16 @@ mutation CreateEndpoint($input: EndpointInput!) {
 """
 
 
+def _get_tool_call_parser(model_id: str) -> str:
+    model_lower = model_id.lower()
+    for family, parser in TOOL_CALL_PARSERS.items():
+        if family == "default":
+            continue
+        if family in model_lower:
+            return parser
+    return TOOL_CALL_PARSERS["default"]
+
+
 class ServerlessProvider:
 
     async def list_endpoints(self, api_key: str) -> list[EndpointInfo]:
@@ -31,8 +49,17 @@ class ServerlessProvider:
         except Exception:
             return []
 
-    async def create_endpoint(self, api_key: str, model_id: str) -> EndpointInfo:
-        variables = {"input": _build_create_input(model_id)}
+    async def create_endpoint(
+        self,
+        api_key: str,
+        model_id: str,
+        gpu_ids: str = "",
+        quantization: str | None = None,
+        hf_token: str = "",
+    ) -> EndpointInfo:
+        variables = {"input": _build_create_input(
+            model_id, gpu_ids, quantization, hf_token,
+        )}
         data = await _graphql(api_key, _CREATE_MUTATION, variables)
         ep = data["data"]["saveEndpoint"]
         return EndpointInfo(
@@ -62,18 +89,32 @@ class ServerlessProvider:
         return SERVERLESS_URL.format(endpoint_id=endpoint_id)
 
 
-def _build_create_input(model_id: str) -> dict:
+def _build_create_input(
+    model_id: str,
+    gpu_ids: str,
+    quantization: str | None = None,
+    hf_token: str = "",
+) -> dict:
+    env = [
+        {"key": "MODEL_NAME", "value": model_id},
+        {"key": "MAX_MODEL_LEN", "value": "8192"},
+        {"key": "DTYPE", "value": "half"},
+        {"key": "ENABLE_AUTO_TOOL_CHOICE", "value": "true"},
+        {"key": "TOOL_CALL_PARSER", "value": _get_tool_call_parser(model_id)},
+        {"key": "GPU_MEMORY_UTILIZATION", "value": "0.90"},
+    ]
+    if quantization:
+        env.append({"key": "QUANTIZATION", "value": quantization})
+    if hf_token:
+        env.append({"key": "HF_TOKEN", "value": hf_token})
     return {
         "name": f"deus-{model_id.split('/')[-1].lower()[:20]}",
-        "templateId": "runpod-vllm",
+        "templateId": "d46z8rtpd0",  # vLLM v2.14.0 serverless template
+        "gpuIds": gpu_ids,
         "workersMin": 0,
         "workersMax": 3,
         "idleTimeout": 5,
-        "env": [
-            {"key": "MODEL_NAME", "value": model_id},
-            {"key": "MAX_MODEL_LEN", "value": "8192"},
-            {"key": "DTYPE", "value": "half"},
-        ],
+        "env": env,
     }
 
 

@@ -13,6 +13,7 @@ def test_config_dataclass_defaults():
     assert c.brave_api_key == ""
     assert c.endpoint_type == "pod"
     assert c.endpoint_id == ""
+    assert c.hf_token == ""
 
 
 def test_load_config_creates_default_when_missing(tmp_path, monkeypatch):

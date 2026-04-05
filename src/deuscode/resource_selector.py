@@ -69,11 +69,66 @@ async def _create_new(
     provider, api_key: str, endpoint_type: str,
 ) -> EndpointInfo:
     model_id = _pick_model()
+    kwargs: dict = {}
+    if endpoint_type == "serverless":
+        kwargs["gpu_ids"] = _pick_serverless_gpu(api_key)
+        kwargs["quantization"] = _pick_quantization(model_id)
+        kwargs["hf_token"] = _get_hf_token()
     ui.console.print(f"[dim]Creating {endpoint_type} endpoint...[/dim]")
-    endpoint = await provider.create_endpoint(api_key, model_id)
+    endpoint = await provider.create_endpoint(api_key, model_id, **kwargs)
     if endpoint.status == EndpointStatus.COLD:
         ui.warning("First query may take 30-60s (cold start).")
     return endpoint
+
+
+def _pick_quantization(model_id: str) -> str | None:
+    """Ask about AWQ quantization for large models (32B+)."""
+    from rich.prompt import Confirm
+    model = next((m for m in MODELS if m["id"] == model_id), None)
+    if not model or model.get("param_count_b", 0) < 32:
+        return None
+    label = model.get("label", model_id.split("/")[-1])
+    if Confirm.ask(
+        f"Enable AWQ quantization for {label}? "
+        f"(reduces VRAM ~50%, slight quality loss)",
+        default=False,
+    ):
+        return "awq"
+    return None
+
+
+def _get_hf_token() -> str:
+    from deuscode.config import load_config
+    try:
+        return load_config().hf_token
+    except Exception:
+        return ""
+
+
+# Serverless GPU class IDs — these are NOT the same as gpuTypes.id (hardware names).
+# RunPod serverless uses class identifiers; discovered from real endpoint introspection.
+_SERVERLESS_GPUS = [
+    {"class_id": "ADA_80_PRO",  "label": "H100 SXM / A100 Ada Pro", "vram": "80GB", "note": "★ Best"},
+    {"class_id": "AMPERE_80",   "label": "A100 80GB PCIe",           "vram": "80GB", "note": "★ Recommended"},
+    {"class_id": "ADA_48",      "label": "RTX A6000 Ada 48GB",       "vram": "48GB", "note": "Good"},
+    {"class_id": "AMPERE_48",   "label": "A40 / A6000 48GB",         "vram": "48GB", "note": "Good"},
+    {"class_id": "ADA_24",      "label": "RTX 4090 24GB",            "vram": "24GB", "note": "Small models"},
+]
+
+
+def _pick_serverless_gpu(_api_key: str = "") -> str:
+    """Return a serverless GPU class ID string (comma-separated for multi-GPU)."""
+    table = Table(title="Select GPU class for serverless workers")
+    table.add_column("#", style="cyan", width=3)
+    table.add_column("GPU class", width=26)
+    table.add_column("VRAM", width=6)
+    table.add_column("Tier", width=16)
+    for i, g in enumerate(_SERVERLESS_GPUS, 1):
+        table.add_row(str(i), g["label"], g["vram"], g["note"])
+    ui.console.print(table)
+    choice = IntPrompt.ask("Pick a GPU class", default=2)
+    idx = max(0, min(choice - 1, len(_SERVERLESS_GPUS) - 1))
+    return _SERVERLESS_GPUS[idx]["class_id"]
 
 
 def _pick_model() -> str:
