@@ -19,3 +19,9 @@ def test_parse_resource_command():
 def test_parse_non_special_command():
     result = parse_special_command("write me a function")
     assert result is None
+
+
+def test_parse_clear_is_not_special_command():
+    # --clear is handled directly in run_chat_loop, not via parse_special_command
+    result = parse_special_command("--clear")
+    assert result is None

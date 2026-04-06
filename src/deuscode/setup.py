@@ -160,6 +160,11 @@ async def _setup_serverless(api_key: str) -> None:
         endpoint = await _connect_or_create(provider, api_key)
 
     save_endpoint(endpoint, api_key)
+    if endpoint.workers_min == 0:
+        ui.print_dim(
+            "Tip: Set 'Min Workers: 1' in console.runpod.io for instant "
+            "responses. Current setting (0) may cause 30-60s queue delays."
+        )
     if endpoint.status == EndpointStatus.COLD:
         ui.warning("First query may take 30-60s (cold start).")
     ui.final_answer(

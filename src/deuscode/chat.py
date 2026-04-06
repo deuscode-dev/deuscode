@@ -70,7 +70,13 @@ async def handle_resource_command(config) -> "Config":
         return config
 
 
-async def _process_prompt(user_input: str, path: str, no_map: bool, config) -> str:
+async def _process_prompt(
+    user_input: str,
+    path: str,
+    no_map: bool,
+    config,
+    conversation_history: list[dict],
+) -> tuple[str, list[dict]]:
     """Full planning pipeline: detect → plan → preload → execute."""
     from deuscode.complexity import detect_complexity, Complexity
     from deuscode.action_plan import simple_plan
@@ -95,7 +101,7 @@ async def _process_prompt(user_input: str, path: str, no_map: bool, config) -> s
     else:
         preloaded = {"files": {}, "searches": {}}
 
-    return await run_agent(plan, preloaded, repo_map, config, path)
+    return await run_agent(plan, preloaded, repo_map, config, path, conversation_history)
 
 
 async def run_chat_loop(
@@ -105,6 +111,8 @@ async def run_chat_loop(
     no_map: bool = False,
 ) -> None:
     from deuscode.config import load_config
+    from deuscode import agent as _agent
+    _agent._cold_warned_this_session = False
     try:
         config = load_config()
     except FileNotFoundError as e:
@@ -119,8 +127,9 @@ async def run_chat_loop(
     ui.console.print(
         f"[bold green]Deus[/bold green] [dim]{config.model}[/dim]  (Ctrl+C or empty line to exit)"
     )
-    ui.print_dim("Type --model to switch models, --resource to switch endpoints\n")
+    ui.print_dim("Type --model to switch models, --resource to switch endpoints, --clear to reset history\n")
 
+    conversation_history: list[dict] = []
     prompt_label = f"[bold cyan][{dir_name}] you[/bold cyan]"
     pending = initial_prompt
     while True:
@@ -137,6 +146,11 @@ async def run_chat_loop(
                 ui.console.print("[dim]Goodbye.[/dim]")
                 break
 
+        if user_input.strip() == "--clear":
+            conversation_history = []
+            ui.print_dim("Conversation history cleared.")
+            continue
+
         special = parse_special_command(user_input)
         if special:
             cmd, args = special
@@ -146,7 +160,9 @@ async def run_chat_loop(
                 config = await handle_resource_command(config)
             continue
 
-        result = await _process_prompt(user_input, path, no_map, config)
+        result, conversation_history = await _process_prompt(
+            user_input, path, no_map, config, conversation_history,
+        )
         ui.final_answer(result)
 
     await _maybe_auto_stop(config)

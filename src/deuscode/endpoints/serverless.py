@@ -76,9 +76,12 @@ class ServerlessProvider:
                 if r.status_code != 200:
                     return EndpointStatus.COLD
                 workers = r.json().get("workers", {})
-                if workers.get("running", 0) > 0:
-                    return EndpointStatus.READY
-                return EndpointStatus.COLD
+                warm = (
+                    workers.get("running", 0)
+                    + workers.get("ready", 0)
+                    + workers.get("idle", 0)
+                )
+                return EndpointStatus.READY if warm > 0 else EndpointStatus.COLD
         except Exception:
             return EndpointStatus.ERROR
 
@@ -121,7 +124,7 @@ def _build_create_input(
         "name": f"deus-{model_id.split('/')[-1].lower()[:20]}",
         "templateId": "d46z8rtpd0",  # vLLM v2.14.0 serverless template
         "gpuIds": gpu_ids,
-        "workersMin": 0,
+        "workersMin": 1,
         "workersMax": 3,
         "idleTimeout": 5,
         "env": env,
@@ -138,6 +141,7 @@ def _parse_endpoint(raw: dict) -> EndpointInfo:
         status=EndpointStatus.COLD,
         base_url=SERVERLESS_URL.format(endpoint_id=raw["id"]),
         display_name=raw.get("name", raw["id"]),
+        workers_min=raw.get("workersMin", 0),
     )
 
 

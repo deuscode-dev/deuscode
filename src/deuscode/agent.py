@@ -11,6 +11,7 @@ from deuscode.repomap import generate_repo_map
 from deuscode import tools, ui, runpod
 
 _xml_fallback_warned = False
+_cold_warned_this_session = False
 
 _SYSTEM_BASE = """\
 You are Deus, an AI coding assistant running in a terminal.
@@ -65,28 +66,66 @@ async def call_llm(system: str, messages: list, config: Config) -> str:
     return _strip_thinking(msg.get("content") or "")
 
 
+_MAX_HISTORY_TURNS = 20
+_SUMMARIZE_PROMPT = "Summarize what you just did in one or two sentences, no XML tags."
+
+
+def _keep_for_history(msg: dict) -> bool:
+    """True if the message belongs in the next prompt's conversation context.
+
+    Strips tool-execution noise (tool results, intermediate tool-call steps,
+    summarize prompts) that bloats context without adding conversational value.
+    """
+    role = msg.get("role")
+    content = msg.get("content") or ""
+    if role == "tool":
+        return False
+    if role == "user" and content.startswith("<tool_result>"):
+        return False
+    if role == "user" and content == _SUMMARIZE_PROMPT:
+        return False
+    if role == "assistant" and msg.get("tool_calls"):
+        return False  # intermediate step; final summary is kept
+    return True
+
+
 async def run_agent(
     plan: "ActionPlan",
     preloaded_context: dict,
     repo_map: str,
     config: Config,
     path: str = ".",
-) -> str:
-    """Run the agent with a pre-built plan and preloaded context."""
+    conversation_history: list[dict] | None = None,
+) -> tuple[str, list[dict]]:
+    """Run the agent with a pre-built plan and preloaded context.
+
+    Returns (response_text, updated_history). updated_history is capped at
+    _MAX_HISTORY_TURNS messages to avoid unbounded context growth.
+    """
     await _warn_if_cold(config)
     system = _build_agent_system(plan, preloaded_context, repo_map, path)
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": plan.agent_instructions},
-    ]
+    messages = [{"role": "system", "content": system}]
+    if conversation_history:
+        messages.extend(conversation_history)
+    messages.append({"role": "user", "content": plan.agent_instructions})
+    history_start = 1 + len(conversation_history or [])
     ui.thinking(config.model)
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=600.0, write=30.0, pool=30.0)) as client:
-        return await _loop(client, messages, config.model, config)
+        response_text = await _loop(client, messages, config.model, config)
+    new_turns = [m for m in messages[history_start:] if _keep_for_history(m)]
+    updated = list(conversation_history or []) + new_turns
+    if len(updated) > _MAX_HISTORY_TURNS:
+        updated = updated[-_MAX_HISTORY_TURNS:]
+        # Ensure history never starts with an assistant turn (some models reject this)
+        while updated and updated[0].get("role") != "user":
+            updated = updated[1:]
+    return response_text, updated
 
 
 async def _warn_if_cold(config: Config) -> None:
-    """Warn user if serverless endpoint is cold."""
-    if config.endpoint_type != "serverless" or not config.endpoint_id:
+    """Warn user if serverless endpoint is cold. Shows at most once per session."""
+    global _cold_warned_this_session
+    if _cold_warned_this_session or config.endpoint_type != "serverless" or not config.endpoint_id:
         return
     try:
         from deuscode.endpoints import get_endpoint_provider, EndpointStatus
@@ -94,6 +133,7 @@ async def _warn_if_cold(config: Config) -> None:
         status = await provider.get_status(config.api_key, config.endpoint_id)
         if status == EndpointStatus.COLD:
             ui.print_cold_start_warning(config.model)
+            _cold_warned_this_session = True
     except Exception:
         pass
 

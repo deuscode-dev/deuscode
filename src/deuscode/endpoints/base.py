@@ -23,6 +23,7 @@ class EndpointInfo:
     status: EndpointStatus
     base_url: str
     display_name: str = ""
+    workers_min: int = 0
 
 
 @runtime_checkable

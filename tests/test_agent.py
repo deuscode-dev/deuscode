@@ -11,8 +11,13 @@ from deuscode.agent import (
     _request_with_cold_start_handling,
     _cold_start_timeout,
     _call_serverless,
+    _warn_if_cold,
+    run_agent,
+    _keep_for_history,
+    _MAX_HISTORY_TURNS,
     COLD_START_STATUS_CODES,
 )
+import deuscode.agent as _agent_module
 
 
 # ── _strip_thinking ─────────────────────────────────────────────────────────
@@ -227,3 +232,198 @@ async def test_call_serverless_uses_xml_fallback_and_returns_false(monkeypatch):
     assert result_output == output
     # XML instructions must have been injected into system message
     assert "<write_file>" in messages[0]["content"]
+
+
+# ── _warn_if_cold session flag ───────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_warn_if_cold_shows_once_per_session(monkeypatch):
+    """Cold start warning must not repeat on subsequent prompts."""
+    _agent_module._cold_warned_this_session = False
+    warnings_shown = []
+
+    async def fake_get_status(*a, **kw):
+        from deuscode.endpoints.base import EndpointStatus
+        return EndpointStatus.COLD
+
+    monkeypatch.setattr(
+        "deuscode.agent.ui.print_cold_start_warning",
+        lambda *a, **kw: warnings_shown.append(1),
+    )
+
+    class FakeProvider:
+        async def get_status(self, *a, **kw):
+            from deuscode.endpoints.base import EndpointStatus
+            return EndpointStatus.COLD
+
+    monkeypatch.setattr(
+        "deuscode.agent.get_endpoint_provider" if hasattr(_agent_module, "get_endpoint_provider") else
+        "deuscode.endpoints.get_endpoint_provider",
+        lambda *a: FakeProvider(),
+    )
+
+    config = MagicMock()
+    config.endpoint_type = "serverless"
+    config.endpoint_id = "ep-1"
+    config.api_key = "key"
+    config.model = "Qwen/Qwen2.5-Coder-7B-Instruct"
+
+    await _warn_if_cold(config)
+    await _warn_if_cold(config)
+    await _warn_if_cold(config)
+    assert len(warnings_shown) == 1  # only once
+
+
+@pytest.mark.asyncio
+async def test_warn_if_cold_skips_when_ready(monkeypatch):
+    """No warning when workers are warm."""
+    _agent_module._cold_warned_this_session = False
+    warnings_shown = []
+
+    class FakeProvider:
+        async def get_status(self, *a, **kw):
+            from deuscode.endpoints.base import EndpointStatus
+            return EndpointStatus.READY
+
+    monkeypatch.setattr(
+        "deuscode.endpoints.get_endpoint_provider",
+        lambda *a: FakeProvider(),
+    )
+    monkeypatch.setattr(
+        "deuscode.agent.ui.print_cold_start_warning",
+        lambda *a, **kw: warnings_shown.append(1),
+    )
+
+    config = MagicMock()
+    config.endpoint_type = "serverless"
+    config.endpoint_id = "ep-1"
+    config.api_key = "key"
+    config.model = "Qwen/Qwen2.5-Coder-7B-Instruct"
+
+    await _warn_if_cold(config)
+    assert len(warnings_shown) == 0
+
+
+# ── _keep_for_history ────────────────────────────────────────────────────────
+
+def test_keep_for_history_drops_tool_role():
+    assert not _keep_for_history({"role": "tool", "content": "result"})
+
+def test_keep_for_history_drops_tool_result_user_message():
+    assert not _keep_for_history({"role": "user", "content": "<tool_result>big blob</tool_result>"})
+
+def test_keep_for_history_drops_summarize_prompt():
+    assert not _keep_for_history({"role": "user", "content": "Summarize what you just did in one or two sentences, no XML tags."})
+
+def test_keep_for_history_drops_intermediate_tool_call():
+    assert not _keep_for_history({"role": "assistant", "content": "", "tool_calls": [{"id": "x"}]})
+
+def test_keep_for_history_keeps_normal_user():
+    assert _keep_for_history({"role": "user", "content": "fix the bug"})
+
+def test_keep_for_history_keeps_final_assistant():
+    assert _keep_for_history({"role": "assistant", "content": "Done, I fixed it."})
+
+
+# ── run_agent conversation history ───────────────────────────────────────────
+
+def _make_fake_loop(captured_messages: list):
+    """Return a fake _loop that records messages and returns a fixed response."""
+    async def fake_loop(client, messages, model, config):
+        captured_messages.clear()
+        captured_messages.extend(messages)
+        # Simulate assistant reply being appended (as real _loop does)
+        messages.append({"role": "assistant", "content": "Done"})
+        return "Done"
+    return fake_loop
+
+
+def _minimal_plan():
+    from deuscode.action_plan import ActionPlan
+    return ActionPlan(
+        agent_instructions="Do something",
+        reasoning="test",
+        files_to_read=[],
+        search_queries=[],
+        files_to_create=[],
+        validation_steps=[],
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_agent_with_history(monkeypatch):
+    """Prior conversation turns must be injected between system and new user message."""
+    captured = []
+    monkeypatch.setattr("deuscode.agent._loop", _make_fake_loop(captured))
+    monkeypatch.setattr("deuscode.agent._warn_if_cold", AsyncMock())
+    monkeypatch.setattr("deuscode.agent.generate_repo_map", lambda *a: "")
+    monkeypatch.setattr("deuscode.agent.ui.thinking", lambda *a: None)
+
+    config = MagicMock()
+    config.endpoint_type = "pod"
+    prior_history = [
+        {"role": "user", "content": "first question"},
+        {"role": "assistant", "content": "first answer"},
+    ]
+    plan = _minimal_plan()
+    result, updated = await run_agent(
+        plan, {"files": {}, "searches": {}}, "", config, "/tmp",
+        conversation_history=prior_history,
+    )
+    # system, prior user, prior assistant, new user prompt
+    assert captured[0]["role"] == "system"
+    assert captured[1] == prior_history[0]
+    assert captured[2] == prior_history[1]
+    assert captured[3]["role"] == "user"
+    assert captured[3]["content"] == "Do something"
+    assert result == "Done"
+    assert len(updated) > len(prior_history)
+
+
+@pytest.mark.asyncio
+async def test_run_agent_caps_history(monkeypatch):
+    """updated_history must never exceed _MAX_HISTORY_TURNS and must start with user."""
+    captured = []
+    monkeypatch.setattr("deuscode.agent._loop", _make_fake_loop(captured))
+    monkeypatch.setattr("deuscode.agent._warn_if_cold", AsyncMock())
+    monkeypatch.setattr("deuscode.agent.generate_repo_map", lambda *a: "")
+    monkeypatch.setattr("deuscode.agent.ui.thinking", lambda *a: None)
+
+    config = MagicMock()
+    config.endpoint_type = "pod"
+    # 25 prior turns alternating user/assistant — cap will slice mid-pair
+    big_history = [
+        {"role": "user" if i % 2 == 0 else "assistant", "content": f"msg {i}"}
+        for i in range(25)
+    ]
+    plan = _minimal_plan()
+    _, updated = await run_agent(
+        plan, {"files": {}, "searches": {}}, "", config, "/tmp",
+        conversation_history=big_history,
+    )
+    assert len(updated) <= _MAX_HISTORY_TURNS
+    # After capping, history must start with a user message
+    assert updated[0]["role"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_run_agent_empty_history(monkeypatch):
+    """None history must work identically to no-history behaviour."""
+    captured = []
+    monkeypatch.setattr("deuscode.agent._loop", _make_fake_loop(captured))
+    monkeypatch.setattr("deuscode.agent._warn_if_cold", AsyncMock())
+    monkeypatch.setattr("deuscode.agent.generate_repo_map", lambda *a: "")
+    monkeypatch.setattr("deuscode.agent.ui.thinking", lambda *a: None)
+
+    config = MagicMock()
+    config.endpoint_type = "pod"
+    plan = _minimal_plan()
+    result, updated = await run_agent(
+        plan, {"files": {}, "searches": {}}, "", config, "/tmp",
+        conversation_history=None,
+    )
+    assert captured[0]["role"] == "system"
+    assert captured[1]["role"] == "user"
+    assert len(captured) == 2  # only system + user, no injected history
+    assert result == "Done"
+    assert isinstance(updated, list)

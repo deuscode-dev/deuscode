@@ -22,6 +22,13 @@ def test_parse_endpoint_valid():
     assert info.display_name == "deus-qwen"
     assert info.status == EndpointStatus.COLD
     assert info.model_id == "deus-qwen"
+    assert info.workers_min == 0
+
+
+def test_parse_endpoint_workers_min_propagated():
+    raw = {"id": "ep-1", "name": "deus-llama", "workersMin": 1, "workersMax": 3}
+    info = _parse_endpoint(raw)
+    assert info.workers_min == 1
 
 
 def test_get_base_url_format():
@@ -73,11 +80,72 @@ async def test_get_status_ready(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_status_cold(monkeypatch):
+async def test_get_status_cold_when_all_zero(monkeypatch):
     class FakeResp:
         status_code = 200
         def json(self):
-            return {"workers": {"running": 0, "idle": 2}}
+            return {"workers": {"running": 0, "ready": 0, "idle": 0, "initializing": 0}}
+
+    class FakeClient:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        async def get(self, *a, **kw): return FakeResp()
+
+    monkeypatch.setattr(
+        "deuscode.endpoints.serverless.httpx.AsyncClient",
+        lambda **kw: FakeClient(),
+    )
+    provider = ServerlessProvider()
+    assert await provider.get_status("k", "ep") == EndpointStatus.COLD
+
+
+@pytest.mark.asyncio
+async def test_get_status_ready_when_idle(monkeypatch):
+    class FakeResp:
+        status_code = 200
+        def json(self):
+            return {"workers": {"running": 0, "ready": 0, "idle": 2}}
+
+    class FakeClient:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        async def get(self, *a, **kw): return FakeResp()
+
+    monkeypatch.setattr(
+        "deuscode.endpoints.serverless.httpx.AsyncClient",
+        lambda **kw: FakeClient(),
+    )
+    provider = ServerlessProvider()
+    assert await provider.get_status("k", "ep") == EndpointStatus.READY
+
+
+@pytest.mark.asyncio
+async def test_get_status_ready_when_ready(monkeypatch):
+    class FakeResp:
+        status_code = 200
+        def json(self):
+            return {"workers": {"running": 0, "ready": 3, "idle": 0}}
+
+    class FakeClient:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        async def get(self, *a, **kw): return FakeResp()
+
+    monkeypatch.setattr(
+        "deuscode.endpoints.serverless.httpx.AsyncClient",
+        lambda **kw: FakeClient(),
+    )
+    provider = ServerlessProvider()
+    assert await provider.get_status("k", "ep") == EndpointStatus.READY
+
+
+@pytest.mark.asyncio
+async def test_get_status_cold_when_only_initializing(monkeypatch):
+    """Initializing workers are not yet warm — still show cold start warning."""
+    class FakeResp:
+        status_code = 200
+        def json(self):
+            return {"workers": {"running": 0, "ready": 0, "idle": 0, "initializing": 1}}
 
     class FakeClient:
         async def __aenter__(self): return self
@@ -125,6 +193,11 @@ def test_build_create_input_uses_template_id():
     result = _build_create_input("some/model", "AMPERE_80")
     assert result["templateId"] == "d46z8rtpd0"
     assert "imageName" not in result
+
+
+def test_build_create_input_workers_min_is_one():
+    result = _build_create_input("some/model", "AMPERE_80")
+    assert result["workersMin"] == 1
 
 
 def test_build_create_input_with_quantization():
