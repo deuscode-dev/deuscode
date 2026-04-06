@@ -1,11 +1,17 @@
 """Tests for agent.py — pure helper functions."""
 
+import pytest
+from unittest.mock import AsyncMock, MagicMock
 from deuscode.agent import (
     _strip_thinking,
     _clean_response,
     _parse_xml_tools,
     _normalize_args,
     _build_system_prompt,
+    _request_with_cold_start_handling,
+    _cold_start_timeout,
+    _call_serverless,
+    COLD_START_STATUS_CODES,
 )
 
 
@@ -105,9 +111,119 @@ def test_normalize_args_bash_cmd_alias():
     assert _normalize_args("bash", raw, "") == {"command": "ls"}
 
 
+# ── _request_with_cold_start_handling ───────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_cold_start_returns_on_200():
+    resp = MagicMock(status_code=200)
+    client = MagicMock()
+    client.post = AsyncMock(return_value=resp)
+    result = await _request_with_cold_start_handling(client, "http://x", {}, {})
+    assert result.status_code == 200
+    assert client.post.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_cold_start_retries_on_500(monkeypatch):
+    monkeypatch.setattr("deuscode.agent.COLD_START_POLL_INTERVAL", 0)
+    monkeypatch.setattr("deuscode.agent.ui.console.print", lambda *a, **kw: None)
+    cold = MagicMock(status_code=500)
+    ok = MagicMock(status_code=200)
+    client = MagicMock()
+    client.post = AsyncMock(side_effect=[cold, cold, ok])
+    result = await _request_with_cold_start_handling(client, "http://x", {}, {})
+    assert result.status_code == 200
+    assert client.post.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_cold_start_retries_on_read_timeout(monkeypatch):
+    import httpx as _httpx
+    monkeypatch.setattr("deuscode.agent.COLD_START_POLL_INTERVAL", 0)
+    monkeypatch.setattr("deuscode.agent._cold_start_timeout", lambda *a: 9999)
+    monkeypatch.setattr("deuscode.agent.ui.console.print", lambda *a, **kw: None)
+    ok = MagicMock(status_code=200)
+    client = MagicMock()
+    client.post = AsyncMock(side_effect=[_httpx.ReadTimeout("timeout"), ok])
+    result = await _request_with_cold_start_handling(client, "http://x", {}, {})
+    assert result.status_code == 200
+    assert client.post.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_cold_start_passes_through_400():
+    resp = MagicMock(status_code=400)
+    client = MagicMock()
+    client.post = AsyncMock(return_value=resp)
+    result = await _request_with_cold_start_handling(client, "http://x", {}, {})
+    assert result.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_cold_start_raises_after_timeout(monkeypatch):
+    monkeypatch.setattr("deuscode.agent.COLD_START_POLL_INTERVAL", 0)
+    monkeypatch.setattr("deuscode.agent._cold_start_timeout", lambda *a: 0)
+    monkeypatch.setattr("deuscode.agent.ui.console.print", lambda *a, **kw: None)
+    cold = MagicMock(status_code=503)
+    client = MagicMock()
+    client.post = AsyncMock(return_value=cold)
+    with pytest.raises(RuntimeError, match="did not become ready"):
+        await _request_with_cold_start_handling(client, "http://x", {}, {})
+
+
+def test_cold_start_constants():
+    assert 500 in COLD_START_STATUS_CODES
+    assert 502 in COLD_START_STATUS_CODES
+    assert 503 in COLD_START_STATUS_CODES
+    assert 504 not in COLD_START_STATUS_CODES  # gateway timeout, not cold start
+
+
+def test_cold_start_timeout_by_model_size():
+    assert _cold_start_timeout("Qwen/Qwen2.5-Coder-7B-Instruct") == 900
+    assert _cold_start_timeout("Qwen/Qwen2.5-Coder-14B-Instruct") == 1200
+    assert _cold_start_timeout("Qwen/Qwen2.5-Coder-32B-Instruct") == 1800
+    assert _cold_start_timeout("meta-llama/Llama-3.1-70B-Instruct") == 2400
+    assert _cold_start_timeout("unknown/model") == 900  # unknown → 0 params → ≤7 bucket
+
+
 # ── _build_system_prompt ────────────────────────────────────────────────────
 
 def test_build_system_prompt_no_map():
     prompt = _build_system_prompt("/tmp", no_map=True)
     assert "Working directory:" in prompt
     assert "Files in working directory" not in prompt
+
+
+# ── _call_serverless ─────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_call_serverless_uses_xml_fallback_and_returns_false(monkeypatch):
+    """_call_serverless must inject XML system prompt and always return use_tools=False."""
+    output = {"choices": [{"message": {"role": "assistant", "content": "Hello"}}]}
+
+    async def fake_submit(*a, **kw):
+        return "job-id-1"
+
+    async def fake_poll(*a, **kw):
+        return output
+
+    monkeypatch.setattr("deuscode.agent.ui.console.print", lambda *a, **kw: None)
+    monkeypatch.setattr("deuscode.endpoints.job_client.submit_job", fake_submit)
+    monkeypatch.setattr("deuscode.endpoints.job_client.poll_job", fake_poll)
+
+    from unittest.mock import MagicMock
+    config = MagicMock()
+    config.api_key = "key"
+    config.endpoint_id = "ep-1"
+    config.model = "Qwen/Qwen2.5-Coder-7B-Instruct"
+    config.max_tokens = 512
+
+    messages = [
+        {"role": "system", "content": "You are Deus."},
+        {"role": "user", "content": "hello"},
+    ]
+    result_output, use_tools = await _call_serverless(messages, config, use_tools=True)
+    assert use_tools is False  # always XML path
+    assert result_output == output
+    # XML instructions must have been injected into system message
+    assert "<write_file>" in messages[0]["content"]

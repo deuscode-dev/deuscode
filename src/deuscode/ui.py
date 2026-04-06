@@ -99,5 +99,53 @@ def warning(text: str) -> None:
     console.print(f"[bold yellow]⚠ {text}[/bold yellow]")
 
 
+def print_worker_status(health: dict, elapsed: int) -> None:
+    """Show RunPod worker status during cold start polling."""
+    workers = health.get("workers", {})
+    jobs = health.get("jobs", {})
+    initializing = workers.get("initializing", 0)
+    ready = workers.get("ready", 0)
+    running = workers.get("running", 0)
+    idle = workers.get("idle", 0)
+    in_queue = jobs.get("inQueue", 0)
+    parts = []
+    if initializing:
+        parts.append(f"[yellow]◌ {initializing} initializing[/yellow]")
+    if ready:
+        parts.append(f"[green]● {ready} ready[/green]")
+    if running:
+        parts.append(f"[blue]⚡ {running} running[/blue]")
+    if idle:
+        parts.append(f"[dim]○ {idle} idle[/dim]")
+    if in_queue:
+        parts.append(f"[dim]{in_queue} queued[/dim]")
+    status = "  ".join(parts) if parts else "[dim]waiting...[/dim]"
+    console.print(f"[dim]  {elapsed}s elapsed — workers: {status}[/dim]")
+
+
+def print_cold_start_warning(model_id: str) -> None:
+    from deuscode.models import MODELS
+    model = next((m for m in MODELS if m["id"] == model_id), None)
+    params = model["param_count_b"] if model else 0
+    if params <= 7:
+        wait = "5-15 minutes (first time)"
+    elif params <= 14:
+        wait = "10-20 minutes (first time)"
+    elif params <= 32:
+        wait = "15-30 minutes (first time)"
+    else:
+        wait = "20-40 minutes (first time)"
+    console.print(Panel(
+        f"[yellow]Endpoint is cold.[/yellow]\n"
+        f"Model: {model_id.split('/')[-1]}\n"
+        f"Expected wait: {wait}\n"
+        f"[dim]Subsequent queries will be instant.[/dim]\n"
+        f"[dim]Tip: Subsequent cold starts are faster once "
+        f"CUDA graphs are cached.[/dim]",
+        title="⏳ Cold Start",
+        border_style="yellow",
+    ))
+
+
 def confirm(prompt: str) -> bool:
     return Confirm.ask(prompt)

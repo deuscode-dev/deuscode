@@ -1,6 +1,7 @@
 """Tests for resource_selector."""
 
-from deuscode.resource_selector import _pick_endpoint_type, _pick_quantization, _get_hf_token, _pick_serverless_gpu, _SERVERLESS_GPUS
+import pytest
+from deuscode.resource_selector import _pick_endpoint_type, _pick_quantization, _get_hf_token, _pick_serverless_gpu, _SERVERLESS_GPUS, _resolve_model
 
 
 def test_pick_endpoint_type_serverless(monkeypatch):
@@ -43,6 +44,36 @@ def test_pick_quantization_returns_none_when_declined(monkeypatch):
     monkeypatch.setattr("rich.prompt.Confirm.ask", lambda *a, **kw: False)
     result = _pick_quantization("Qwen/Qwen2.5-Coder-32B-Instruct")
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_model_uses_live_endpoint(monkeypatch):
+    class FakeResp:
+        status_code = 200
+        def json(self): return {"data": [{"id": "Qwen/Qwen2.5-Coder-7B-Instruct"}]}
+
+    class FakeClient:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        async def get(self, *a, **kw): return FakeResp()
+
+    monkeypatch.setattr("deuscode.resource_selector.httpx.AsyncClient", lambda **kw: FakeClient())
+    result = await _resolve_model("https://api.runpod.ai/v2/ep-1/openai/v1", "key")
+    assert result == "Qwen/Qwen2.5-Coder-7B-Instruct"
+
+
+@pytest.mark.asyncio
+async def test_resolve_model_falls_back_to_picker_on_cold(monkeypatch):
+    class FakeClient:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        async def get(self, *a, **kw): raise ConnectionError("cold")
+
+    monkeypatch.setattr("deuscode.resource_selector.httpx.AsyncClient", lambda **kw: FakeClient())
+    monkeypatch.setattr("deuscode.resource_selector.ui.console.print", lambda *a, **kw: None)
+    monkeypatch.setattr("deuscode.resource_selector.IntPrompt.ask", lambda *a, **kw: 3)
+    result = await _resolve_model("https://api.runpod.ai/v2/ep-1/openai/v1", "key")
+    assert "/" in result  # full model ID from MODELS list
 
 
 def test_get_hf_token_returns_empty_on_missing_config(tmp_path, monkeypatch):

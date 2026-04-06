@@ -16,7 +16,6 @@ TOOL_CALL_PARSERS = {
 _LIST_QUERY = """
 {
   myself {
-    serverlessDiscount
     endpoints { id name templateId workersMin workersMax }
   }
 }
@@ -42,12 +41,10 @@ def _get_tool_call_parser(model_id: str) -> str:
 class ServerlessProvider:
 
     async def list_endpoints(self, api_key: str) -> list[EndpointInfo]:
-        try:
-            data = await _graphql(api_key, _LIST_QUERY)
-            endpoints = data["data"]["myself"]["endpoints"]
-            return [_parse_endpoint(e) for e in endpoints]
-        except Exception:
-            return []
+        """Raises on API/network error. Returns [] when no endpoints exist."""
+        data = await _graphql(api_key, _LIST_QUERY)
+        endpoints = data["data"]["myself"]["endpoints"]
+        return [_parse_endpoint(e) for e in endpoints]
 
     async def create_endpoint(
         self,
@@ -89,6 +86,19 @@ class ServerlessProvider:
         return SERVERLESS_URL.format(endpoint_id=endpoint_id)
 
 
+async def get_health(api_key: str, endpoint_id: str) -> dict:
+    """Return full RunPod health dict. Never raises — returns {} on any error."""
+    url = f"https://api.runpod.ai/v2/{endpoint_id}/health"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(url, headers=_auth_header(api_key))
+            if r.status_code == 200:
+                return r.json()
+        return {}
+    except Exception:
+        return {}
+
+
 def _build_create_input(
     model_id: str,
     gpu_ids: str,
@@ -119,10 +129,12 @@ def _build_create_input(
 
 
 def _parse_endpoint(raw: dict) -> EndpointInfo:
+    env = {e["key"]: e["value"] for e in raw.get("env") or []}
+    model_id = env.get("MODEL_NAME") or raw.get("name", "unknown")
     return EndpointInfo(
         endpoint_id=raw["id"],
         endpoint_type=EndpointType.SERVERLESS,
-        model_id=raw.get("name", "unknown"),
+        model_id=model_id,
         status=EndpointStatus.COLD,
         base_url=SERVERLESS_URL.format(endpoint_id=raw["id"]),
         display_name=raw.get("name", raw["id"]),

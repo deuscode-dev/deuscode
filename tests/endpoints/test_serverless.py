@@ -9,6 +9,7 @@ from deuscode.endpoints.serverless import (
     _build_create_input,
     _get_tool_call_parser,
     _parse_endpoint,
+    get_health,
 )
 
 
@@ -20,6 +21,7 @@ def test_parse_endpoint_valid():
     assert info.endpoint_type == EndpointType.SERVERLESS
     assert info.display_name == "deus-qwen"
     assert info.status == EndpointStatus.COLD
+    assert info.model_id == "deus-qwen"
 
 
 def test_get_base_url_format():
@@ -30,15 +32,24 @@ def test_get_base_url_format():
 
 
 @pytest.mark.asyncio
-async def test_list_endpoints_returns_empty_on_error(monkeypatch):
+async def test_list_endpoints_raises_on_error(monkeypatch):
     async def _fail(*a, **kw):
         raise RuntimeError("boom")
     monkeypatch.setattr(
         "deuscode.endpoints.serverless._graphql", _fail,
     )
     provider = ServerlessProvider()
-    result = await provider.list_endpoints("fake-key")
-    assert result == []
+    with pytest.raises(RuntimeError, match="boom"):
+        await provider.list_endpoints("fake-key")
+
+
+@pytest.mark.asyncio
+async def test_list_endpoints_returns_empty_when_none_exist(monkeypatch):
+    async def _empty(*a, **kw):
+        return {"data": {"myself": {"serverlessDiscount": 0, "endpoints": []}}}
+    monkeypatch.setattr("deuscode.endpoints.serverless._graphql", _empty)
+    provider = ServerlessProvider()
+    assert await provider.list_endpoints("fake-key") == []
 
 
 @pytest.mark.asyncio
@@ -110,6 +121,12 @@ def test_build_create_input_has_tool_choice():
     assert "TOOL_CALL_PARSER" in env
 
 
+def test_build_create_input_uses_template_id():
+    result = _build_create_input("some/model", "AMPERE_80")
+    assert result["templateId"] == "d46z8rtpd0"
+    assert "imageName" not in result
+
+
 def test_build_create_input_with_quantization():
     result = _build_create_input("some/model", "ADA_80", quantization="awq")
     env = {e["key"]: e["value"] for e in result["env"]}
@@ -127,3 +144,52 @@ def test_build_create_input_no_quantization_by_default():
     keys = [e["key"] for e in result["env"]]
     assert "QUANTIZATION" not in keys
     assert "HF_TOKEN" not in keys
+
+
+@pytest.mark.asyncio
+async def test_get_health_returns_empty_on_error(monkeypatch):
+    monkeypatch.setattr(
+        "deuscode.endpoints.serverless.httpx.AsyncClient",
+        lambda **kw: (_ for _ in ()).throw(Exception("net error")),
+    )
+    assert await get_health("key", "ep-1") == {}
+
+
+@pytest.mark.asyncio
+async def test_get_health_returns_empty_on_non_200(monkeypatch):
+    class FakeResp:
+        status_code = 404
+
+    class FakeClient:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        async def get(self, *a, **kw): return FakeResp()
+
+    monkeypatch.setattr(
+        "deuscode.endpoints.serverless.httpx.AsyncClient", lambda **kw: FakeClient(),
+    )
+    assert await get_health("key", "ep-1") == {}
+
+
+@pytest.mark.asyncio
+async def test_get_health_parses_worker_counts(monkeypatch):
+    payload = {
+        "workers": {"idle": 0, "initializing": 1, "ready": 0, "running": 0, "throttled": 0},
+        "jobs": {"completed": 0, "failed": 0, "inProgress": 0, "inQueue": 0, "retried": 0},
+    }
+
+    class FakeResp:
+        status_code = 200
+        def json(self): return payload
+
+    class FakeClient:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        async def get(self, *a, **kw): return FakeResp()
+
+    monkeypatch.setattr(
+        "deuscode.endpoints.serverless.httpx.AsyncClient", lambda **kw: FakeClient(),
+    )
+    result = await get_health("key", "ep-1")
+    assert result["workers"]["initializing"] == 1
+    assert "jobs" in result

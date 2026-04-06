@@ -140,18 +140,24 @@ async def run_stop_runpod() -> None:
 
 async def _setup_serverless(api_key: str) -> None:
     """Create or reuse a RunPod Serverless endpoint."""
-    from deuscode.endpoints.serverless import ServerlessProvider
-    from deuscode.endpoints.base import EndpointStatus
+    from deuscode.endpoints.serverless import ServerlessProvider, SERVERLESS_URL
+    from deuscode.endpoints.base import EndpointInfo, EndpointStatus, EndpointType
     from deuscode.config import save_endpoint
     from deuscode.resource_selector import _pick_or_create, _create_new
 
     provider = ServerlessProvider()
-    existing = await provider.list_endpoints(api_key)
+    try:
+        existing = await provider.list_endpoints(api_key)
+    except Exception as exc:
+        ui.warning(f"Could not fetch existing endpoints: {exc}")
+        existing = []
+
+    ui.console.print(f"[dim]Found {len(existing)} existing endpoint(s)[/dim]")
 
     if existing:
         endpoint = await _pick_or_create(provider, api_key, existing)
     else:
-        endpoint = await _create_new(provider, api_key, "serverless")
+        endpoint = await _connect_or_create(provider, api_key)
 
     save_endpoint(endpoint, api_key)
     if endpoint.status == EndpointStatus.COLD:
@@ -162,6 +168,31 @@ async def _setup_serverless(api_key: str) -> None:
         f"  Model: {endpoint.model_id.split('/')[-1]}\n\n"
         f"Run: deus 'your prompt'"
     )
+
+
+async def _connect_or_create(provider, api_key: str):
+    """Offer manual ID entry before falling through to endpoint creation."""
+    from deuscode.endpoints.serverless import SERVERLESS_URL
+    from deuscode.endpoints.base import EndpointInfo, EndpointStatus, EndpointType
+    from deuscode.resource_selector import _create_new
+
+    ui.console.print("[dim]No existing endpoints found.[/dim]")
+    ep_id = Prompt.ask(
+        "Enter existing endpoint ID to reuse (or press Enter to create new)",
+        default="",
+    )
+    if ep_id.strip():
+        from deuscode.resource_selector import _pick_model
+        model_id = _pick_model()
+        return EndpointInfo(
+            endpoint_id=ep_id.strip(),
+            endpoint_type=EndpointType.SERVERLESS,
+            model_id=model_id.strip(),
+            status=EndpointStatus.COLD,
+            base_url=SERVERLESS_URL.format(endpoint_id=ep_id.strip()),
+            display_name=ep_id.strip(),
+        )
+    return await _create_new(provider, api_key, "serverless")
 
 
 def _pick_size() -> str:

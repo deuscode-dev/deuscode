@@ -59,7 +59,7 @@ IMPORTANT: Use these XML tags to actually perform actions. Never just describe w
 async def call_llm(system: str, messages: list, config: Config) -> str:
     """Single-shot LLM call with no tool loop. Used by the planner."""
     full = [{"role": "system", "content": system}] + messages
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=600.0, write=30.0, pool=30.0)) as client:
         data, _ = await _chat(client, full, config.model, config, use_tools=False)
     msg = data["choices"][0]["message"]
     return _strip_thinking(msg.get("content") or "")
@@ -80,7 +80,7 @@ async def run_agent(
         {"role": "user", "content": plan.agent_instructions},
     ]
     ui.thinking(config.model)
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=600.0, write=30.0, pool=30.0)) as client:
         return await _loop(client, messages, config.model, config)
 
 
@@ -93,7 +93,7 @@ async def _warn_if_cold(config: Config) -> None:
         provider = get_endpoint_provider(config.endpoint_type)
         status = await provider.get_status(config.api_key, config.endpoint_id)
         if status == EndpointStatus.COLD:
-            ui.warning("Endpoint is cold — first response may take 30-60s.")
+            ui.print_cold_start_warning(config.model)
     except Exception:
         pass
 
@@ -127,7 +127,7 @@ async def run(
         {"role": "user", "content": prompt},
     ]
     ui.thinking(model)
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=600.0, write=30.0, pool=30.0)) as client:
         result = await _loop(client, messages, model, config)
     await _maybe_auto_stop(config)
     return result
@@ -145,11 +145,45 @@ def _build_system_prompt(path: str, no_map: bool) -> str:
 _MAX_TURNS = 25
 
 
+async def _call_serverless(messages: list, config: Config, use_tools: bool) -> tuple[dict, bool]:
+    """Use RunPod native job API — no HTTP timeout issues during CUDA compilation.
+
+    Native tool calling requires ENABLE_AUTO_TOOL_CHOICE on the endpoint; use XML fallback.
+    """
+    from deuscode.endpoints.job_client import submit_job, poll_job
+    _inject_xml_system(messages)  # XML fallback — job API doesn't support native tools
+    ui.console.print("[dim]◆ Submitting job...[/dim]")
+    job_id = await submit_job(
+        config.api_key, config.endpoint_id,
+        messages, config.model, config.max_tokens,
+    )
+    ui.console.print(f"[dim]  Job ID: {job_id}[/dim]")
+    _STATUS_DISPLAY = {"IN_QUEUE": "⏳ In queue...", "IN_PROGRESS": "⚡ Running..."}
+
+    def on_status(status: str, elapsed: int) -> None:
+        msg = _STATUS_DISPLAY.get(status)
+        if msg and elapsed % 10 == 0:
+            ui.console.print(f"[dim]  {elapsed}s — {msg}[/dim]")
+
+    max_wait = _cold_start_timeout(config.model)
+    output = await poll_job(
+        config.api_key, config.endpoint_id, job_id,
+        on_status_update=on_status, max_wait=max_wait,
+    )
+    return output, False  # always XML path for serverless job API
+
+
 async def _loop(client: httpx.AsyncClient, messages: list, model: str, config: Config) -> str:
     use_tools = True  # starts True; flipped to False on first 400 and stays False
     for _ in range(_MAX_TURNS):
-        data, use_tools = await _chat(client, messages, model, config, use_tools)
-        msg = data["choices"][0]["message"]
+        if config.endpoint_type == "serverless":
+            data, use_tools = await _call_serverless(messages, config, use_tools)
+        else:
+            data, use_tools = await _chat(client, messages, model, config, use_tools)
+        choices = data.get("choices") or []
+        if not choices:
+            raise RuntimeError(f"Empty response from model: {data!r:.200}")
+        msg = choices[0]["message"]
         content = _strip_thinking(msg.get("content") or "")
         messages.append(msg)
 
@@ -274,8 +308,55 @@ async def _offer_code_blocks(text: str) -> None:
 
 # ── HTTP chat ─────────────────────────────────────────────────────────────────
 
-_RETRY_STATUSES = {502, 503, 504}
-_RETRY_DELAYS = [5, 10, 20, 30, 60]
+COLD_START_STATUS_CODES = {500, 502, 503}
+COLD_START_POLL_INTERVAL = 10  # check every 10 seconds
+
+
+def _cold_start_timeout(model_id: str) -> int:
+    """Max cold start wait in seconds — CUDA graph compilation dominates first boot."""
+    from deuscode.models import MODELS
+    model = next((m for m in MODELS if m["id"] == model_id), None)
+    params = model["param_count_b"] if model else 0
+    if params <= 7:   return 900   # 15 min
+    if params <= 14:  return 1200  # 20 min
+    if params <= 32:  return 1800  # 30 min
+    return 2400                    # 40 min
+
+
+async def _request_with_cold_start_handling(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict,
+    payload: dict,
+    config: "Config | None" = None,
+) -> httpx.Response:
+    """Send immediately; retry on 500/502/503 or ReadTimeout with health status display."""
+    import time
+    from deuscode.endpoints.serverless import get_health
+    api_key = config.api_key if config else ""
+    endpoint_id = config.endpoint_id if config else ""
+    max_wait = _cold_start_timeout(config.model if config else "")
+    start = time.monotonic()
+    while True:
+        elapsed = int(time.monotonic() - start)
+        if elapsed > max_wait:
+            raise RuntimeError(
+                f"Endpoint did not become ready after {max_wait}s. "
+                "Check RunPod console for errors."
+            )
+        try:
+            response = await client.post(url, headers=headers, json=payload)
+        except httpx.ReadTimeout:
+            elapsed = int(time.monotonic() - start)
+            health = await get_health(api_key, endpoint_id)
+            ui.print_worker_status(health, elapsed)
+            continue  # retry immediately — no sleep on timeout
+        if response.status_code not in COLD_START_STATUS_CODES:
+            return response
+        elapsed = int(time.monotonic() - start)
+        health = await get_health(api_key, endpoint_id)
+        ui.print_worker_status(health, elapsed)
+        await asyncio.sleep(COLD_START_POLL_INTERVAL)
 
 
 async def _chat(
@@ -294,14 +375,7 @@ async def _chat(
     if use_tools:
         payload["tools"] = tools.TOOL_SCHEMAS
 
-    for delay in _RETRY_DELAYS + [None]:
-        response = await client.post(url, headers=headers, json=payload)
-        if response.status_code not in _RETRY_STATUSES:
-            break
-        if delay is None:
-            break
-        ui.console.print(f"[dim]Server not ready ({response.status_code}), retrying in {delay}s...[/dim]")
-        await asyncio.sleep(delay)
+    response = await _request_with_cold_start_handling(client, url, headers, payload, config)
 
     if response.status_code == 400 and use_tools and "tool" in response.text.lower():
         global _xml_fallback_warned

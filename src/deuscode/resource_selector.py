@@ -1,5 +1,6 @@
 """Unified interactive resource selection for setup and --resource."""
 
+import httpx
 from rich.prompt import IntPrompt, Prompt
 from rich.table import Table
 
@@ -46,23 +47,53 @@ async def _pick_or_create(
     provider, api_key: str, existing: list[EndpointInfo],
 ) -> EndpointInfo:
     table = Table(title="Available endpoints")
-    table.add_column("#", style="cyan", width=3)
-    table.add_column("ID", width=14)
-    table.add_column("Name")
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("ID", width=16)
+    table.add_column("Model", width=30)
     table.add_column("Status", width=12)
     for i, ep in enumerate(existing, 1):
         status = await provider.get_status(api_key, ep.endpoint_id)
+        model_short = ep.model_id.split("/")[-1]
         table.add_row(
-            str(i), ep.endpoint_id[:14],
-            ep.display_name, _STATUS_ICONS.get(status, "?"),
+            str(i), ep.endpoint_id[:16],
+            model_short, _STATUS_ICONS.get(status, "?"),
         )
     table.add_row(str(len(existing) + 1), "[dim]New endpoint[/dim]", "", "")
     ui.console.print(table)
     choice = IntPrompt.ask("Pick endpoint", default=1)
     if choice <= len(existing):
-        return existing[choice - 1]
+        ep = existing[choice - 1]
+        model_id = await _resolve_model(ep.base_url, api_key)
+        return EndpointInfo(
+            endpoint_id=ep.endpoint_id,
+            endpoint_type=ep.endpoint_type,
+            model_id=model_id,
+            status=ep.status,
+            base_url=ep.base_url,
+            display_name=ep.display_name,
+        )
     ep_type = existing[0].endpoint_type.value
     return await _create_new(provider, api_key, ep_type)
+
+
+async def _resolve_model(base_url: str, api_key: str) -> str:
+    """Auto-detect model from live endpoint; fall back to picker if cold."""
+    url = f"{base_url.rstrip('/')}/models"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(
+                url, headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if r.status_code == 200:
+                models = r.json().get("data", [])
+                if models:
+                    detected = models[0]["id"]
+                    ui.console.print(f"[dim]Auto-detected model: {detected}[/dim]")
+                    return detected
+    except Exception:
+        pass
+    ui.console.print("[dim]Endpoint is cold — select the model it's configured to run.[/dim]")
+    return _pick_model()
 
 
 async def _create_new(
